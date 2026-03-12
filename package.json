@@ -1,6 +1,10 @@
 {
 	"name": "@svelte-i18n/core",
-	"version": "0.0.1-alpha.2",
+	"version": "1.0.0",
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	},
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build && npm run prepack",
@@ -11,7 +15,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"changesets": "npx @changesets/cli",
 		"changesets:version": "npx @changesets/cli version",
-		"changesets:publish": "npx @changesets/cli publish",
+		"changesets:publish": "pnpm build && npx @changesets/cli publish",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write ."
 	},

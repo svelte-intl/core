@@ -1,7 +1,11 @@
 <script lang="ts">
+	import { I18nContext, i18n } from '../test/i18n.ts';
+
 	import './layout.css';
+
+	let { children } = $props();
 </script>
 
-Hello, welcome to the Svelte Intl package! This package provides internationalization (i18n) support
-for Svelte applications, allowing you to easily manage translations and locale-specific formatting.
-Below is an overview of the key features and how to get started with Svelte Intl.
+<I18nContext {i18n}>
+	{@render children?.()}
+</I18nContext>

@@ -11,17 +11,11 @@
 			}
 		},
 		{
-			"files": [
-				"*.svelte",
-				"*.html"
-			],
+			"files": ["*.svelte", "*.html"],
 			"options": {
-				"plugins": [
-					"prettier-plugin-svelte",
-					"prettier-plugin-tailwindcss"
-				]
+				"plugins": ["prettier-plugin-svelte", "prettier-plugin-tailwindcss"]
 			}
 		}
 	],
-	"tailwindStylesheet": "./packages/svelte-intl/src/routes/layout.css"
+	"tailwindStylesheet": ".//src/routes/layout.css"
 }

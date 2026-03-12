@@ -1,30 +1,39 @@
+import type { MaybePromise, OptionalParams } from './types.js';
 import { getContext } from 'svelte';
 
-export type ExtractMessageParams<T extends string> =
-	T extends `${string}{${infer Param}}${infer Rest}`
-		? { [K in Param]: string | number } & ExtractMessageParams<Rest>
-		: {};
-
-export type Simplify<T> = { [K in keyof T]: T[K] } & {};
-
-export type OptionalParams<Value, Key = never> = Value extends string
-	? keyof Simplify<ExtractMessageParams<Value>> extends never
-		? Key extends string
-			? keyof Simplify<ExtractMessageParams<Key>> extends never
-				? []
-				: [params: Simplify<ExtractMessageParams<Key>>]
-			: []
-		: [params: Simplify<ExtractMessageParams<Value>>]
-	: never;
+export type Dictionary = Record<string, string> | (() => MaybePromise<Record<string, string>>);
+export type UnwrapDictionary<D extends Dictionary> = D extends () => MaybePromise<infer R> ? R : D;
 
 export type CreateI18nOptions<
 	Locales extends string,
-	Messages extends Record<Locales, Record<string, string>>,
+	Dictionaries extends Record<Locales, Dictionary>,
 	Locale extends Locales = Locales
 > = {
 	locales: Locales[];
 	locale: Locale;
-	messages: Messages;
+	dictionaries: Dictionaries;
+};
+
+/**
+ * Loads the dictionaries for all locales. This function takes the `dictionaries` object from the `createI18n` options,
+ * and returns a new object where each dictionary is resolved to its actual messages.
+ *
+ * If a dictionary is a function, it will be called and awaited; if it's an object, it will be used as-is.
+ *
+ * @param dictionaries - The object containing the dictionaries for each locale. The values can be either objects or functions that return a promise of an object.
+ * @private
+ */
+const loadLocales = async <Locales extends string>(
+	dictionaries: Record<Locales, Dictionary>
+): Promise<Record<Locales, Record<string, string>>> => {
+	const entries = await Promise.all(
+		Object.entries<Dictionary>(dictionaries).map(async ([locale, dictionary]) => [
+			locale,
+			typeof dictionary === 'function' ? await dictionary() : dictionary
+		])
+	);
+
+	return Object.fromEntries(entries) as Record<Locales, Record<string, string>>;
 };
 
 /**
@@ -42,23 +51,24 @@ export type CreateI18nOptions<
  * const i18n = getContext(I18N_CONTEXT_KEY);
  */
 export const I18N_CONTEXT_KEY = Symbol('i18n');
-export const createI18n = <
+export const createI18n = async <
 	Locales extends string,
-	Messages extends Record<Locales, Record<string, string>>,
+	Dictionaries extends Record<Locales, Dictionary>,
 	Locale extends Locales = Locales
 >(
-	options: CreateI18nOptions<Locales, Messages, Locale>
+	options: CreateI18nOptions<Locales, Dictionaries, Locale>
 ) => {
 	let locales = $state(options.locales);
 	let locale = $state(options.locale);
-	let messages = $state(options.messages);
+	let dictionaries = $state(await loadLocales(options.dictionaries));
+	let dictionary = $derived(dictionaries[locale]);
 
-	const t = <Key extends keyof Messages[Locale]>(
+	const t = <Key extends keyof UnwrapDictionary<Dictionaries[Locale]>>(
 		key: Key,
-		...args: OptionalParams<Messages[Locale][Key], Key>
+		...args: OptionalParams<UnwrapDictionary<Dictionaries[Locale]>[Key], Key>
 	) => {
 		// @ts-expect-error key mapping
-		let message: string | number = messages[locale][key] || key;
+		let message: string | number = dictionary[key] || key;
 		// @ts-expect-error args bounds
 		let params = args[0] as Record<string, string | number> | undefined;
 
@@ -91,7 +101,12 @@ export const createI18n = <
 		 * The messages for each locale. This is a reactive prop,
 		 * so you can update it at runtime if needed (e.g. to fetch additional messages from an API).
 		 */
-		messages,
+		dictionaries,
+		/**
+		 * The currently active dictionary for the selected locale.
+		 * This is a derived store that automatically updates whenever the `locale` or `dictionaries` change.
+		 */
+		dictionary,
 		/**
 		 * Sets the currently active locale. This will cause all components that use the `t` function to re-render with the new locale.
 		 *
