@@ -1,5 +1,11 @@
 # @svelte-i18n/core
 
+## 1.0.1
+
+### Patch Changes
+
+- Make second argument of `t` and `_` loosly typed if typescript cannot find params in the key
+
 ## 1.0.0
 
 ### Major Changes

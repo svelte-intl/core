@@ -1,4 +1,5 @@
 {
 	"Hello, {username}": "Hoi, {username}",
-	"Change locale": "Wijzig taal"
+	"Change locale": "Wijzig taal",
+	"active_locale": "Huidige taal: {locale}"
 }

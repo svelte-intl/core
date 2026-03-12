@@ -6,10 +6,10 @@ export const { i18n, useI18n } = await createI18n({
 	locale: 'en',
 	dictionaries: {
 		en: async () => {
-			return (await import('./locales/en.json')).default as Record<string, string>;
+			return (await import('./locales/en.json')).default;
 		},
 		nl: async () => {
-			return (await import('./locales/nl.json')).default as Record<string, string>;
+			return (await import('./locales/nl.json')).default;
 		}
 	}
 });

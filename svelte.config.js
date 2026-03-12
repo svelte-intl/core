@@ -8,11 +8,6 @@ const config = {
 		// See https://svelte.dev/docs/kit/adapters for more information about adapters.
 		adapter: adapter()
 	},
-	compilerOptions: {
-		experimental: {
-			async: true
-		}
-	},
 	vitePlugin: {
 		dynamicCompileOptions: ({ filename }) => ({ runes: !filename.includes('node_modules') }),
 		exclude: ['**/test.*']

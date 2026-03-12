@@ -69,7 +69,6 @@ export const createI18n = async <
 	) => {
 		// @ts-expect-error key mapping
 		let message: string | number = dictionary[key] || key;
-		// @ts-expect-error args bounds
 		let params = args[0] as Record<string, string | number> | undefined;
 
 		if (params) {

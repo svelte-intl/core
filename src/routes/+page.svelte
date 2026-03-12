@@ -6,7 +6,7 @@
 </script>
 
 <div class="mx-auto mt-12 max-w-150">
-	<h1 class="mb-6 text-3xl font-bold">{t('Hello, {username}', { username: 'John' })}</h1>
+	<h1 class="mb-6 text-3xl font-bold">{t('active_locale')}</h1>
 
 	<p>
 		Hello, welcome to the Svelte Intl package! This package provides internationalization (i18n)
@@ -14,7 +14,9 @@
 		formatting. Below is an overview of the key features and how to get started with Svelte Intl.
 	</p>
 
-	<h5 class="font-xl mt-4 mb-2 font-bold">{t('Change locale')} ({getLocale()})</h5>
+	<h5 class="font-xl mt-4 mb-2 font-bold">
+		{t('Change locale')} ({getLocale()})
+	</h5>
 	<div class="flex items-start">
 		{#each locales as locale}
 			<button

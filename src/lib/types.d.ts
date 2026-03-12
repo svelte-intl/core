@@ -7,9 +7,9 @@ export type OptionalParams<Value, Key = never> = Value extends string
 	? keyof Simplify<ExtractMessageParams<Value>> extends never
 		? Key extends string
 			? keyof Simplify<ExtractMessageParams<Key>> extends never
-				? []
+				? [params?: Record<string, string | number>]
 				: [params: Simplify<ExtractMessageParams<Key>>]
-			: []
+			: [params?: Record<string, string | number>]
 		: [params: Simplify<ExtractMessageParams<Value>>]
 	: never;
 export type MaybePromise<T> = T | Promise<T>;

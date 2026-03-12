@@ -1,4 +1,5 @@
 {
 	"Hello, {username}": "Good afternoon, {username}",
-	"Change locale": "Change locale"
+	"Change locale": "Change locale",
+	"active_locale": "Current locale: {locale}"
 }
