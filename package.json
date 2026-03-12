@@ -1,6 +1,6 @@
 {
 	"name": "@svelte-i18n/core",
-	"version": "0.0.1-alpha.1",
+	"version": "0.0.1-alpha.2",
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build && npm run prepack",
