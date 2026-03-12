@@ -1,6 +1,6 @@
 {
 	"name": "@svelte-i18n/core",
-	"version": "0.0.1-alpha.0",
+	"version": "0.0.1-alpha.1",
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build && npm run prepack",
@@ -9,6 +9,9 @@
 		"prepack": "svelte-kit sync && svelte-package && publint",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"changesets": "npx @changesets/cli",
+		"changesets:version": "npx @changesets/cli version",
+		"changesets:publish": "npx @changesets/cli publish",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write ."
 	},
