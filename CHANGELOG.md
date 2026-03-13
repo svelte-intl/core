@@ -1,5 +1,17 @@
 # @svelte-i18n/core
 
+## 1.0.4
+
+### Patch Changes
+
+- Add repository
+
+## 1.0.3
+
+### Patch Changes
+
+- Add homepage
+
 ## 1.0.2
 
 ### Patch Changes

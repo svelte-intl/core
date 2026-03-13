@@ -1,8 +1,12 @@
 {
 	"name": "@svelte-i18n/core",
-	"version": "1.0.2",
+	"version": "1.0.4",
 	"private": false,
 	"homepage": "https://svelte-i18n.com",
+	"repository": {
+		"type": "github",
+		"url": "https://github.com/svelte-intl/core"
+	},
 	"publishConfig": {
 		"access": "public"
 	},
