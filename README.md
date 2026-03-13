@@ -19,8 +19,6 @@ No deep nesting, just a simple key -> value translation dictionary
 
 The following guide will walk you through the process of getting svelte-i18n up and running.
 
-## Configuration
-
 ### Install the package
 
 You can install the project via `npm` or `pnpm`.
