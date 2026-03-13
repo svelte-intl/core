@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { I18N_CONTEXT_KEY } from '$lib/index.js';
 	import { setContext } from 'svelte';
-	import { I18nContext, i18n } from '../test/i18n.ts';
+	import { i18n } from '../test/i18n.ts';
 
 	import './layout.css';
 

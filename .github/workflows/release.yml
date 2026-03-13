@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main # change to master if that's your default branch
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '25.x'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build packages
+        run: pnpm run build
+        continue-on-error: true
+
+      - name: Create Release Pull Request or Publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          # This tells Changesets what command to run when publishing
+          publish: pnpm publish --recursive --access public --no-git-checks
+          # This command creates the GitHub releases automatically after publishing
+          createGithubReleases: true
+        env:
+          # Used to create the PRs and GitHub Releases
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Used to publish to npm
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
