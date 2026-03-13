@@ -15,6 +15,13 @@ Many libraries also require a complicated setup, and in the case of Wuchale, a l
 But what if you just need i18n and nothing more? That is exactly why I created svelte-i18n.
 No deep nesting, just a simple key -> value translation dictionary
 
+## What this is not
+
+svelte-i18n is not intended to replace feature-rich libraries like Wuchale or Paraglide.js.
+Those solutions offer advanced capabilities for complex translation needs,
+such as deeply nested keys or managing large volumes of strings. Instead, svelte-i18n is
+designed for projects that require straightforward, key-value translations without extensive configuration or overhead.
+
 ## Getting started
 
 The following guide will walk you through the process of getting svelte-i18n up and running.
