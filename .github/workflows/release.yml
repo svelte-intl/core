@@ -52,3 +52,4 @@ jobs:
         env:
           # Only GITHUB_TOKEN is needed now
           GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.RELEASE_NPM_TOKEN }}
