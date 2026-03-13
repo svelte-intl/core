@@ -1,5 +1,11 @@
 # @svelte-i18n/core
 
+## 1.0.5
+
+### Patch Changes
+
+- c6e1f01: Remove deprecated warning to allow to set the context manually
+
 ## 1.0.4
 
 ### Patch Changes
