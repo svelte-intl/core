@@ -15,25 +15,25 @@ export type CreateI18nOptions<
 };
 
 /**
- * Loads the dictionaries for all locales. This function takes the `dictionaries` object from the `createI18n` options,
- * and returns a new object where each dictionary is resolved to its actual messages.
+ * Loads the dictionary for the specified locale.
  *
- * If a dictionary is a function, it will be called and awaited; if it's an object, it will be used as-is.
+ * If the dictionary is a function, it will be called to load the dictionary (which can be asynchronous).
+ * If it's an object, it will be returned directly.
  *
- * @param dictionaries - The object containing the dictionaries for each locale. The values can be either objects or functions that return a promise of an object.
- * @private
+ * @param locale - The locale for which to load the dictionary
+ * @param dictionaries - The record of dictionaries for all locales
+ *
+ * @returns The loaded dictionary for the specified locale
  */
-const loadLocales = async <Locales extends string>(
+const loadDictionary = async <Locales extends string>(
+	locale: Locales,
 	dictionaries: Record<Locales, Dictionary>
-): Promise<Record<Locales, Record<string, string>>> => {
-	const entries = await Promise.all(
-		Object.entries<Dictionary>(dictionaries).map(async ([locale, dictionary]) => [
-			locale,
-			typeof dictionary === 'function' ? await dictionary() : dictionary
-		])
-	);
+) => {
+	if (typeof dictionaries[locale] === 'function') {
+		return await dictionaries[locale]();
+	}
 
-	return Object.fromEntries(entries) as Record<Locales, Record<string, string>>;
+	return dictionaries[locale];
 };
 
 /**
@@ -61,9 +61,21 @@ export const createI18n = async <
 	options: CreateI18nOptions<Locales, Dictionaries, Locale>
 ) => {
 	let locales = $state(options.locales);
-	let locale = $state(options.locale);
-	let dictionaries = $state(await loadLocales(options.dictionaries));
-	let dictionary = $derived(dictionaries[locale]);
+	let locale = $state.raw(options.locale);
+	let dictionaries = $state.raw(options.dictionaries);
+	let dictionary = $state(await loadDictionary(locale, options.dictionaries));
+
+	$effect.root(() => {
+		$effect(() => {
+			loadDictionary(locale, options.dictionaries)
+				.then((loadedDictionary) => {
+					dictionary = loadedDictionary;
+				})
+				.catch((error) => {
+					console.error(`Failed to load dictionary for locale "${locale}":`, error);
+				});
+		});
+	});
 
 	const t = <Key extends keyof UnwrapDictionary<Dictionaries[Locale]>>(
 		key: Key,
@@ -78,6 +90,7 @@ export const createI18n = async <
 				message = String(message).replace(`{${paramKey}}`, String(paramValue));
 			}
 		}
+
 		return message as string;
 	};
 
@@ -124,7 +137,10 @@ export const createI18n = async <
 			locale = newLocale as Locale;
 		},
 		/**
-		 * Gets the currently active locale. This can be useful for conditionally rendering content based on the active locale, or for displaying the current language in a UI element.
+		 * Gets the currently active locale.
+		 *
+		 * This can be useful for conditionally rendering content based on the active locale,
+		 * or for displaying the current language in a UI element.
 		 *
 		 * @returns The currently active locale.
 		 * @example
@@ -136,6 +152,25 @@ export const createI18n = async <
 		 */
 		getLocale() {
 			return locale;
+		},
+		/**
+		 * Gets the list of supported locales.
+		 *
+		 * This is handy when you destructure the i18n instance and want to access the list of
+		 * supported locales without having to reference the original `locales` prop directly.
+		 *
+		 * This can be useful for rendering a language switcher in your application,
+		 * or for validating user input when setting the locale.
+		 *
+		 * @returns An array of supported locales.
+		 * @example
+		 * import { useI18n } from '$lib/i18n';
+		 * const { getLocales } = useI18n();
+		 *
+		 * <p>Supported locales: {getLocales().join(', ')}</p>
+		 */
+		getLocales() {
+			return locales;
 		},
 		/**
 		 * The translation function. This function takes a message key and an optional object of parameters,
