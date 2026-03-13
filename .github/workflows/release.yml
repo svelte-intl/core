@@ -50,7 +50,7 @@ jobs:
           publish: pnpm exec changeset publish
           createGithubReleases: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.RELEASE_NPM_TOKEN }}
           # This enables provenance securely for the changeset publish command
           NPM_CONFIG_PROVENANCE: true
