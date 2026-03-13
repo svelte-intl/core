@@ -37,18 +37,20 @@ const loadLocales = async <Locales extends string>(
 };
 
 /**
- * The context key used to store the i18n instance in Svelte's context. This is a unique symbol to avoid collisions with other context keys.
+ * The context key used to store the i18n instance in Svelte's context.
+ * This is a unique symbol to avoid collisions with other context keys.
  *
- * @deprecated use useI18n instead to access the i18n instance in your components.
- * The I18N_CONTEXT_KEY is an internal implementation detail and should be avoided in favor of the useI18n hook,
- * which provides a cleaner and more intuitive API for accessing the i18n functionality in your components.
+ * You can use this to set the context manually if you need to,
+ * but it's generally recommended to use the `I18nContext` provider component
+ * to make the i18n instance available in your component tree.
  *
  * @internal
  * @example
- * import { getContext } from 'svelte';
+ * import { setContext } from 'svelte';
  * import { I18N_CONTEXT_KEY } from '$lib/i18n';
+ * import { i18n } from '$lib/i18n';
  *
- * const i18n = getContext(I18N_CONTEXT_KEY);
+ * setContext(I18N_CONTEXT_KEY, i18n);
  */
 export const I18N_CONTEXT_KEY = Symbol('i18n');
 export const createI18n = async <

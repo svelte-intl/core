@@ -2,11 +2,11 @@
 	import { useI18n } from '../test/i18n.ts';
 
 	const { t, setLocale, getLocale, locales } = useI18n();
-	console.log(useI18n());
+	console.log(getLocale());
 </script>
 
 <div class="mx-auto mt-12 max-w-150">
-	<h1 class="mb-6 text-3xl font-bold">{t('active_locale')}</h1>
+	<h1 class="mb-6 text-3xl font-bold">{t('active_locale', { locale: getLocale() })}</h1>
 
 	<p>
 		Hello, welcome to the Svelte Intl package! This package provides internationalization (i18n)
@@ -15,7 +15,7 @@
 	</p>
 
 	<h5 class="font-xl mt-4 mb-2 font-bold">
-		{t('Change locale')} ({getLocale()})
+		{t('Change locale')}
 	</h5>
 	<div class="flex items-start">
 		{#each locales as locale}

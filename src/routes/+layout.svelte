@@ -1,11 +1,12 @@
 <script lang="ts">
+	import { I18N_CONTEXT_KEY } from '$lib/index.js';
+	import { setContext } from 'svelte';
 	import { I18nContext, i18n } from '../test/i18n.ts';
 
 	import './layout.css';
 
 	let { children } = $props();
+	setContext(I18N_CONTEXT_KEY, i18n);
 </script>
 
-<I18nContext {i18n}>
-	{@render children?.()}
-</I18nContext>
+{@render children?.()}
