@@ -1,4 +1,21 @@
-# Getting started
+# Introduction
+
+Why another i18n library?
+
+- ✅ Easy to use
+- ✅ Easiest setup we can come up with
+- ✅ Safe to use with SSR by default
+- ✅ No external dependencies
+- ✅ Very small footprint (8kb)
+
+Most Svelte-specific i18n libraries are outdated and/or rely on Svelte stores instead of runes.
+That approach works, but I did not like the $\_('hello') syntax and wanted something more future-proof.
+
+Many libraries also require a complicated setup, and in the case of Wuchale, a lot of configuration.
+But what if you just need i18n and nothing more? That is exactly why I created svelte-i18n.
+No deep nesting, just a simple key -> value translation dictionary
+
+## Getting started
 
 The following guide will walk you through the process of getting svelte-i18n up and running.
 
