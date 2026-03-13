@@ -1,5 +1,11 @@
 # @svelte-i18n/core
 
+## 1.0.6
+
+### Patch Changes
+
+- 58a649c: Update readme to explain both context methods
+
 ## 1.0.5
 
 ### Patch Changes
