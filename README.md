@@ -1,4 +1,4 @@
-# Introduction
+# svelte-i18m
 
 Why another i18n library?
 
