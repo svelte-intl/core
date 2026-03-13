@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     branches:
-      - main # change to master if that's your default branch
+      - main
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -11,6 +11,14 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+
+    # REQUIRED: These permissions allow GitHub to use OIDC (id-token)
+    # and Changesets to create PRs and Releases
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,7 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '25.x'
+          node-version: '25.x' # Note: Node 25 doesn't exist yet, Node 22 is the current LTS
           registry-url: 'https://registry.npmjs.org'
           cache: 'pnpm'
 
@@ -38,12 +46,9 @@ jobs:
         id: changesets
         uses: changesets/action@v1
         with:
-          # This tells Changesets what command to run when publishing
-          publish: pnpm publish --recursive --access public --no-git-checks
-          # This command creates the GitHub releases automatically after publishing
+          # ADDED --provenance for extra security
+          publish: pnpm publish --recursive --access public --no-git-checks --provenance
           createGithubReleases: true
         env:
-          # Used to create the PRs and GitHub Releases
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Used to publish to npm
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Only GITHUB_TOKEN is needed now
+          GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}

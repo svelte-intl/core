@@ -4,8 +4,8 @@
 	"private": false,
 	"homepage": "https://svelte-i18n.com",
 	"repository": {
-		"type": "github",
-		"url": "https://github.com/svelte-intl/core"
+		"type": "git",
+		"url": "git+https://github.com/svelte-intl/core.git"
 	},
 	"publishConfig": {
 		"access": "public"
