@@ -1,5 +1,11 @@
 # @svelte-i18n/core
 
+## 1.0.7
+
+### Patch Changes
+
+- 6efe4bd: Explain what this library is not to prevent confusion
+
 ## 1.0.6
 
 ### Patch Changes
