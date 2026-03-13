@@ -50,8 +50,10 @@ export const { i18n, useI18n } = await createI18n({
 
 ### Edit +layout.svelte
 
-To make svelte-i18n SSR safe we wrap our app with a context provider.
-This step is required even if you dont use SSR, since we use the [Context API](https://svelte.dev/docs/svelte/context).
+To make svelte-i18n SSR safe we need to set the context using the [context API](https://svelte.dev/docs/svelte/context).
+There are two methods to do this.
+
+#### Using provider
 
 ```svelte title="src/routes/+layout.svelte"
 <script lang="ts">
@@ -64,6 +66,21 @@ This step is required even if you dont use SSR, since we use the [Context API](h
 <I18nContext {i18n}>
     {@render children?.()}
 </I18nContext>
+```
+
+#### Manually
+
+```svelte title="src/routes/+layout.svelte"
+<script lang="ts">
+    import { I18N_CONTEXT_KEY } from '@svelte-i18n/core';
+	import { setContext } from 'svelte';
+	import { i18n } from '$lib/i18n';
+
+    let { children } = $props();
+	setContext(I18N_CONTEXT_KEY, i18n);
+</script>
+
+{@render children?.()}
 ```
 
 ### 🎉 finished, you have setup svelte-i18n
