@@ -1,5 +1,6 @@
 import { createI18n, I18nContext } from '$lib/index.js';
 
+console.time('i18n');
 export { I18nContext };
 export const { i18n, useI18n } = await createI18n({
 	locales: ['en', 'nl'],
@@ -13,3 +14,4 @@ export const { i18n, useI18n } = await createI18n({
 		}
 	}
 });
+console.timeEnd('i18n');
