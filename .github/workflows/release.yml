@@ -46,10 +46,11 @@ jobs:
         id: changesets
         uses: changesets/action@v1
         with:
-          # ADDED --provenance for extra security
-          publish: pnpm publish --recursive --access public --no-git-checks --provenance
+          # Use changeset publish so the Action knows what to release
+          publish: pnpm exec changeset publish
           createGithubReleases: true
         env:
-          # Only GITHUB_TOKEN is needed now
-          GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.RELEASE_NPM_TOKEN }}
+          # This enables provenance securely for the changeset publish command
+          NPM_CONFIG_PROVENANCE: true
