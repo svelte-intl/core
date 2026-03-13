@@ -1,5 +1,12 @@
 # @svelte-i18n/core
 
+## 1.0.8
+
+### Patch Changes
+
+- 9f9b824: Revert token name
+- 0745d82: Update release file to also release to gh
+
 ## 1.0.7
 
 ### Patch Changes
