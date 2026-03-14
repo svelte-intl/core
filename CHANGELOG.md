@@ -1,5 +1,17 @@
 # @svelte-i18n/core
 
+## 1.1.0
+
+### Minor Changes
+
+- 877d079: Expose new loading property, that can be used to prevent for various cases
+- e1b05d8: Add support for fallback locale and correctly fallback to locale if locale does not exist
+- f97fe91: Load only the dictionary of the active locale instead of loading all dictionaries
+
+### Patch Changes
+
+- 0d036a5: Add guidelines and license
+
 ## 1.0.8
 
 ### Patch Changes
