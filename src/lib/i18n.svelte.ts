@@ -109,7 +109,9 @@ export const createI18n = async <
 	let dictionary = $state.raw(
 		await loadDictionary(locale as Locales, options.dictionaries)
 	);
+
 	let initialized = false;
+	let currentLocale = locale;
 
 	if (browser) {
 		loading = false;
@@ -136,6 +138,13 @@ export const createI18n = async <
 
 			loadDictionary(locale as Locales, options.dictionaries)
 				.then((loadedDictionary) => {
+					/**
+					 * Prevent race conditions
+					 */
+					if (locale !== currentLocale) {
+						return;
+					}
+
 					dictionary = loadedDictionary;
 				})
 				.catch((error) => {
