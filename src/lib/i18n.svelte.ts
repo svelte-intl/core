@@ -109,7 +109,7 @@ export const createI18n = async <
 	let dictionary = $state.raw(
 		await loadDictionary(locale as Locales, options.dictionaries)
 	);
-	let initialLocale = locale;
+	let initialized = false;
 
 	if (browser) {
 		loading = false;
@@ -120,7 +120,8 @@ export const createI18n = async <
 			/**
 			 * Prevent double loading of the dictionary on initial render
 			 */
-			if (locale === initialLocale) {
+			if (!initialized) {
+				initialized = true;
 				return;
 			}
 
@@ -130,11 +131,7 @@ export const createI18n = async <
 					`Locale "${locale}" is not in the list of supported locales: ${locales.join(', ')}.`
 				);
 
-				locale = getLocale(
-					options.locale as Locales,
-					options.locales,
-					options.fallbackLocale
-				);
+				locale = options.fallbackLocale ?? locales[0];
 			}
 
 			loadDictionary(locale as Locales, options.dictionaries)
