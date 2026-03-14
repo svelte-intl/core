@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { page } from '$app/state';
+	import { useI18n } from '$test/i18n.js';
 
-	const { t, getLocales, setLocale, getLocale } = page.data.useI18n();
+	const { t, getLocales, setLocale, getLocale } = useI18n();
 </script>
 
 <div class="mx-auto mt-12 max-w-150">

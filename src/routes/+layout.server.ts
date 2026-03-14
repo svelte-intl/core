@@ -4,6 +4,8 @@ export const load = async ({ request }) => {
 		?.split(',')[0]
 		.split('-')[0];
 
+	console.log(locale);
+
 	return {
 		locale: 'nl'
 	};

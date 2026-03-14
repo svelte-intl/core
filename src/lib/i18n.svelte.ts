@@ -19,6 +19,17 @@ export type CreateI18nOptions<
 	fallbackLocale?: Locale;
 };
 
+export type I18nInstance<
+	Locales extends string = string,
+	Dictionaries extends Record<Locales, Dictionary> = Record<
+		Locales,
+		Dictionary
+	>,
+	Locale extends Locales = Locales
+> = Awaited<
+	ReturnType<typeof createI18n<Locales, Dictionaries, Locale>>
+>['i18n'];
+
 /**
  * Loads the dictionary for the specified locale.
  *
@@ -340,7 +351,18 @@ export const createI18n = async <
 		useI18n: () => getContext<typeof i18n>(I18N_CONTEXT_KEY)
 	};
 };
-
+/**
+ * Sets the i18n instance in Svelte's context, making it available to all child components via the `useI18n` hook.
+ * This is typically used internally by the `I18nContext` provider component, but you can also use it directly if you need to set the context manually.
+ *
+ * @param data - A function that returns the i18n instance to set in the context. This allows for lazy initialization of the i18n instance, which can be useful if you need to load dictionaries asynchronously.
+ * @example +layout.svelte
+ * import { loadI18n } from '$lib/i18n';
+ *
+ * let { children, data }: LayoutProps = $props();
+ *
+ * loadI18n(() => data.i18n);
+ */
 export const loadI18n = (
 	data: () => Awaited<ReturnType<typeof createI18n>>['i18n']
 ) => {
