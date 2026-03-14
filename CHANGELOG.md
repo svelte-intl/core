@@ -1,5 +1,11 @@
 # @svelte-i18n/core
 
+## 1.3.0
+
+### Minor Changes
+
+- 0b2299b: Fix bug locales not switching
+
 ## 1.2.0
 
 ### Minor Changes
