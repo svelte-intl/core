@@ -1,3 +1,4 @@
+import { browser } from '$app/environment';
 import type { MaybePromise, OptionalParams } from './types.js';
 import { getContext } from 'svelte';
 
@@ -95,6 +96,7 @@ export const createI18n = async <
 >(
 	options: CreateI18nOptions<Locales, Dictionaries, Locale>
 ) => {
+	let loading = $state(true);
 	let locales = $state(options.locales);
 	let locale = $state.raw(
 		getLocale(
@@ -108,8 +110,13 @@ export const createI18n = async <
 		await loadDictionary(locale as Locales, options.dictionaries)
 	);
 
+	if (browser) {
+		loading = false;
+	}
+
 	$effect.root(() => {
 		$effect(() => {
+			loading = true;
 			if (!locales.includes(locale as Locales)) {
 				console.warn(
 					`Locale "${locale}" is not in the list of supported locales: ${locales.join(', ')}. Defaulting to "${locales[0]}".`
@@ -131,6 +138,9 @@ export const createI18n = async <
 						`Failed to load dictionary for locale "${locale}":`,
 						error
 					);
+				})
+				.finally(() => {
+					loading = false;
 				});
 		});
 	});
@@ -157,6 +167,9 @@ export const createI18n = async <
 		 * The list of supported locales. This can be used to, for example, render a language switcher in your application.
 		 * This is a reactive prop, so you can update it at runtime if needed (e.g. to fetch additional locales from an API).
 		 *
+		 * If you destructure the i18n instance and want to access the list of supported locales without
+		 * having to reference the original `locales` prop directly, you can use the `getLocales` method instead.
+		 *
 		 * @example
 		 * import { useI18n } from '$lib/i18n';
 		 *
@@ -179,6 +192,14 @@ export const createI18n = async <
 		 * This is a derived store that automatically updates whenever the `locale` or `dictionaries` change.
 		 */
 		dictionary,
+		/**
+		 * A boolean indicating whether the i18n instance is currently loading the dictionary for the active locale.
+		 * This can be useful for showing a loading indicator while the dictionary is being loaded.
+		 *
+		 * If you destructure the i18n instance and want to access the loading state without having to
+		 * reference the original `loading` prop directly, you can use the `getLoading` method instead.
+		 */
+		loading,
 		/**
 		 * Sets the currently active locale. This will cause all components that use the `t` function to re-render with the new locale.
 		 *
@@ -229,6 +250,24 @@ export const createI18n = async <
 		 */
 		getLocales() {
 			return locales;
+		},
+		/**
+		 * Gets the loading state of the i18n instance.
+		 * This can be useful for showing a loading indicator while the dictionary is being loaded.
+		 *
+		 * @returns A boolean indicating whether the i18n instance is currently loading the dictionary.
+		 * @example
+		 * import { useI18n } from '$lib/i18n';
+		 * const { getLoading } = useI18n();
+		 *
+		 * {#if getLoading()}
+		 *   <p>Loading translations...</p>
+		 * {:else}
+		 *   <p>Translations loaded!</p>
+		 * {/if}
+		 */
+		getLoading() {
+			return loading;
 		},
 		/**
 		 * The translation function. This function takes a message key and an optional object of parameters,
