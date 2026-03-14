@@ -1,13 +1,12 @@
 <script lang="ts">
-	import { I18N_CONTEXT_KEY } from '$lib/index.js';
+	import type { LayoutProps } from './$types.d.ts';
+	import { I18N_CONTEXT_KEY, loadI18n } from '$lib/index.js';
 	import { setContext } from 'svelte';
-	import { i18n } from '../test/i18n.ts';
-	import { page } from '$app/state';
 
 	import './layout.css';
 
-	let { children } = $props();
-	setContext(I18N_CONTEXT_KEY, i18n);
+	let { children, data }: LayoutProps = $props();
+	loadI18n(() => data.i18n);
 </script>
 
 {@render children?.()}

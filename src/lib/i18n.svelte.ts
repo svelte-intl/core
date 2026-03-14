@@ -1,6 +1,6 @@
 import { browser } from '$app/environment';
 import type { MaybePromise, OptionalParams } from './types.js';
-import { getContext } from 'svelte';
+import { getContext, setContext } from 'svelte';
 
 export type Dictionary =
 	| Record<string, string>
@@ -96,6 +96,8 @@ export const createI18n = async <
 >(
 	options: CreateI18nOptions<Locales, Dictionaries, Locale>
 ) => {
+	console.log(options.locale);
+
 	let loading = $state(true);
 	let locales = $state(options.locales);
 	let locale = $state.raw(
@@ -110,23 +112,12 @@ export const createI18n = async <
 		await loadDictionary(locale as Locales, options.dictionaries)
 	);
 
-	let initialized = false;
-	let currentLocale = locale;
-
 	if (browser) {
 		loading = false;
 	}
 
 	$effect.root(() => {
 		$effect(() => {
-			/**
-			 * Prevent double loading of the dictionary on initial render
-			 */
-			if (!initialized) {
-				initialized = true;
-				return;
-			}
-
 			loading = true;
 			if (!locales.includes(locale as Locales)) {
 				console.warn(
@@ -138,13 +129,6 @@ export const createI18n = async <
 
 			loadDictionary(locale as Locales, options.dictionaries)
 				.then((loadedDictionary) => {
-					/**
-					 * Prevent race conditions
-					 */
-					if (locale !== currentLocale) {
-						return;
-					}
-
 					dictionary = loadedDictionary;
 				})
 				.catch((error) => {
@@ -159,9 +143,9 @@ export const createI18n = async <
 		});
 	});
 
-	const t = <Key extends keyof UnwrapDictionary<Dictionaries[Locale]>>(
+	const t = <Key extends keyof UnwrapDictionary<Dictionaries[Locales]>>(
 		key: Key,
-		...args: OptionalParams<UnwrapDictionary<Dictionaries[Locale]>[Key], Key>
+		...args: OptionalParams<UnwrapDictionary<Dictionaries[Locales]>[Key], Key>
 	) => {
 		// @ts-expect-error key mapping
 		let message: string | number = dictionary[key] || key;
@@ -315,14 +299,29 @@ export const createI18n = async <
 		 */
 		t,
 		/**
+		 * Gets the fallback locale defined in the i18n options. This is the locale that will
+		 * be used if the active locale is not supported or if a translation is missing.
+		 *
+		 * This can be useful for conditionally rendering content based on the fallback locale,
+		 * or for displaying the fallback language in a UI element.
+		 *
+		 * @returns The fallback locale defined in the i18n options, or undefined if no fallback locale is set.
+		 * @example
+		 * import { useI18n } from '$lib/i18n';
+		 * const { getFallbackLocale } = useI18n();
+		 *
+		 * <p>Fallback locale: {getFallbackLocale() ?? 'None'}</p>
+		 */
+		getFallbackLocale() {
+			return options.fallbackLocale;
+		},
+		/**
 		 * Alias for the `t` function, provided for convenience. You can use either `t` or `_` to translate messages in your components.
 		 *
 		 * @see t
 		 */
 		_: t
 	};
-
-	const useI18n = () => getContext<typeof i18n>(I18N_CONTEXT_KEY);
 
 	return {
 		i18n,
@@ -338,6 +337,12 @@ export const createI18n = async <
 		 *
 		 * const { t, setLocale } = useI18n();
 		 */
-		useI18n
+		useI18n: () => getContext<typeof i18n>(I18N_CONTEXT_KEY)
 	};
+};
+
+export const loadI18n = (
+	data: () => Awaited<ReturnType<typeof createI18n>>['i18n']
+) => {
+	return setContext(I18N_CONTEXT_KEY, data());
 };
