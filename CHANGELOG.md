@@ -1,5 +1,17 @@
 # @svelte-i18n/core
 
+## 1.2.0
+
+### Minor Changes
+
+- adfcf94: Fix some bug regarding the fallback locale
+
+### Patch Changes
+
+- aedac1b: Converted exposed properties to getters, to keep reactivity
+- 08b65a1: Fixed a potential reace condition
+- 2b31dc8: Fixed another issue regarding fallback locale
+
 ## 1.1.0
 
 ### Minor Changes
