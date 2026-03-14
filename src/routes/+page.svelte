@@ -3,6 +3,7 @@
 
 	const { t, setLocale, getLocale, getLocales, getLoading } = useI18n();
 	//console.log(useI18n());
+	console.log(getLoading());
 </script>
 
 {#if false === getLoading()}

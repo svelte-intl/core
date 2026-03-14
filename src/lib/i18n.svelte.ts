@@ -106,9 +106,7 @@ export const createI18n = async <
 		)
 	);
 	let dictionaries = $state.raw(options.dictionaries);
-	let dictionary = $state(
-		await loadDictionary(locale as Locales, options.dictionaries)
-	);
+	let dictionary = $state();
 
 	if (browser) {
 		loading = false;
@@ -170,6 +168,7 @@ export const createI18n = async <
 		 * If you destructure the i18n instance and want to access the list of supported locales without
 		 * having to reference the original `locales` prop directly, you can use the `getLocales` method instead.
 		 *
+		 * @readonly
 		 * @example
 		 * import { useI18n } from '$lib/i18n';
 		 *
@@ -181,25 +180,39 @@ export const createI18n = async <
 		 *   </button>
 		 * {/each}
 		 */
-		locales,
+		get locales() {
+			return locales;
+		},
 		/**
 		 * The messages for each locale. This is a reactive prop,
 		 * so you can update it at runtime if needed (e.g. to fetch additional messages from an API).
+		 *
+		 * @readonly
 		 */
-		dictionaries,
+		get dictionaries() {
+			return dictionaries;
+		},
 		/**
 		 * The currently active dictionary for the selected locale.
 		 * This is a derived store that automatically updates whenever the `locale` or `dictionaries` change.
+		 *
+		 * @readonly
 		 */
-		dictionary,
+		get dictionary() {
+			return dictionary;
+		},
 		/**
 		 * A boolean indicating whether the i18n instance is currently loading the dictionary for the active locale.
 		 * This can be useful for showing a loading indicator while the dictionary is being loaded.
 		 *
 		 * If you destructure the i18n instance and want to access the loading state without having to
 		 * reference the original `loading` prop directly, you can use the `getLoading` method instead.
+		 *
+		 * @readonly
 		 */
-		loading,
+		get loading() {
+			return { current: loading };
+		},
 		/**
 		 * Sets the currently active locale. This will cause all components that use the `t` function to re-render with the new locale.
 		 *
