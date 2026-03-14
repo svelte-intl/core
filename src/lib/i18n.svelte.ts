@@ -1,8 +1,11 @@
 import type { MaybePromise, OptionalParams } from './types.js';
 import { getContext } from 'svelte';
 
-export type Dictionary = Record<string, string> | (() => MaybePromise<Record<string, string>>);
-export type UnwrapDictionary<D extends Dictionary> = D extends () => MaybePromise<infer R> ? R : D;
+export type Dictionary =
+	| Record<string, string>
+	| (() => MaybePromise<Record<string, string>>);
+export type UnwrapDictionary<D extends Dictionary> =
+	D extends () => MaybePromise<infer R> ? R : D;
 
 export type CreateI18nOptions<
 	Locales extends string,
@@ -10,8 +13,9 @@ export type CreateI18nOptions<
 	Locale extends Locales = Locales
 > = {
 	locales: Locales[];
-	locale: Locale;
+	locale: Locale | (string & {});
 	dictionaries: Dictionaries;
+	fallbackLocale?: Locale;
 };
 
 /**
@@ -34,6 +38,37 @@ const loadDictionary = async <Locales extends string>(
 	}
 
 	return dictionaries[locale];
+};
+
+/**
+ * Determines the appropriate locale to use based on the provided locale,
+ * the list of supported locales, and an optional fallback locale.
+ *
+ * @param locale - The locale to check (e.g. "en-US")
+ * @param supportedLocales - The list of supported locales (e.g. ["en", "nl"])
+ * @param fallbackLocale - An optional fallback locale to use if the provided locale is not supported (e.g. "en")
+ *
+ * @returns The determined locale to use (e.g. "en")
+ */
+const getLocale = (
+	locale: string,
+	supportedLocales: string[],
+	fallbackLocale?: string
+) => {
+	if (supportedLocales.includes(locale)) {
+		return locale;
+	}
+
+	if (fallbackLocale) {
+		return fallbackLocale;
+	}
+
+	const language = locale.split('-')[0];
+	if (supportedLocales.includes(language)) {
+		return language;
+	}
+
+	return supportedLocales[0];
 };
 
 /**
@@ -61,18 +96,41 @@ export const createI18n = async <
 	options: CreateI18nOptions<Locales, Dictionaries, Locale>
 ) => {
 	let locales = $state(options.locales);
-	let locale = $state.raw(options.locale);
+	let locale = $state.raw(
+		getLocale(
+			options.locale as Locales,
+			options.locales,
+			options.fallbackLocale
+		)
+	);
 	let dictionaries = $state.raw(options.dictionaries);
-	let dictionary = $state(await loadDictionary(locale, options.dictionaries));
+	let dictionary = $state(
+		await loadDictionary(locale as Locales, options.dictionaries)
+	);
 
 	$effect.root(() => {
 		$effect(() => {
-			loadDictionary(locale, options.dictionaries)
+			if (!locales.includes(locale as Locales)) {
+				console.warn(
+					`Locale "${locale}" is not in the list of supported locales: ${locales.join(', ')}. Defaulting to "${locales[0]}".`
+				);
+
+				locale = getLocale(
+					options.locale as Locales,
+					options.locales,
+					options.fallbackLocale
+				);
+			}
+
+			loadDictionary(locale as Locales, options.dictionaries)
 				.then((loadedDictionary) => {
 					dictionary = loadedDictionary;
 				})
 				.catch((error) => {
-					console.error(`Failed to load dictionary for locale "${locale}":`, error);
+					console.error(
+						`Failed to load dictionary for locale "${locale}":`,
+						error
+					);
 				});
 		});
 	});

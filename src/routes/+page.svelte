@@ -2,7 +2,7 @@
 	import { useI18n } from '../test/i18n.ts';
 
 	const { t, setLocale, getLocale, locales } = useI18n();
-	console.log(getLocale());
+	//console.log(useI18n());
 </script>
 
 <div class="mx-auto mt-12 max-w-150">
