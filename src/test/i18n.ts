@@ -5,7 +5,7 @@ console.time('i18n');
 export { I18nContext };
 export const { i18n, useI18n } = await createI18n({
 	locales: ['en', 'nl'],
-	locale: browser ? navigator.language.split('-')[0] : 'en',
+	locale: navigator.language.split('-')[0] || 'en',
 	fallbackLocale: 'en',
 	dictionaries: {
 		en: async () => {

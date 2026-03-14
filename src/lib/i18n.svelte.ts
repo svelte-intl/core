@@ -60,13 +60,13 @@ const getLocale = (
 		return locale;
 	}
 
-	if (fallbackLocale) {
-		return fallbackLocale;
-	}
-
 	const language = locale.split('-')[0];
 	if (supportedLocales.includes(language)) {
 		return language;
+	}
+
+	if (fallbackLocale) {
+		return fallbackLocale;
 	}
 
 	return supportedLocales[0];
@@ -106,7 +106,10 @@ export const createI18n = async <
 		)
 	);
 	let dictionaries = $state.raw(options.dictionaries);
-	let dictionary = $state();
+	let dictionary = $state.raw(
+		await loadDictionary(locale as Locales, options.dictionaries)
+	);
+	let initialLocale = locale;
 
 	if (browser) {
 		loading = false;
@@ -114,10 +117,17 @@ export const createI18n = async <
 
 	$effect.root(() => {
 		$effect(() => {
+			/**
+			 * Prevent double loading of the dictionary on initial render
+			 */
+			if (locale === initialLocale) {
+				return;
+			}
+
 			loading = true;
 			if (!locales.includes(locale as Locales)) {
 				console.warn(
-					`Locale "${locale}" is not in the list of supported locales: ${locales.join(', ')}. Defaulting to "${locales[0]}".`
+					`Locale "${locale}" is not in the list of supported locales: ${locales.join(', ')}.`
 				);
 
 				locale = getLocale(
