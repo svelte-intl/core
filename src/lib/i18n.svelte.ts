@@ -104,8 +104,6 @@ export const createI18n = async <
 >(
 	options: CreateI18nOptions<Locales, Dictionaries, Locale>
 ) => {
-	console.log(options.locale);
-
 	let loading = $state(true);
 	let locales = $state(options.locales);
 	let locale = $state.raw(
