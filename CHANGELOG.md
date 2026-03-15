@@ -1,5 +1,15 @@
 # @svelte-i18n/core
 
+## 2.0.0
+
+### Major Changes
+
+- 84a3484: simplify setup and better SSR integration
+
+### Patch Changes
+
+- 2e3a8f2: Remove console.log
+
 ## 1.3.0
 
 ### Minor Changes
