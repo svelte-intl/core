@@ -1,5 +1,3 @@
-# svelte-i18n
-
 <img src="./static/logo-dark.png" alt="svelte-i18n logo">
 
 ### Why another i18n library?
@@ -12,4 +10,4 @@
 
 To get started, head to the docs:
 
-#### https://svelte-i18n.com
+### https://svelte-i18n.com
