@@ -1,6 +1,5 @@
 import {
 	createI18n,
-	loadI18n,
 	I18N_CONTEXT_KEY,
 	type CreateI18nOptions,
 	type I18nInstance
@@ -10,7 +9,6 @@ import I18nContext from './i18n-context.svelte';
 export {
 	I18nContext,
 	createI18n,
-	loadI18n,
 	I18N_CONTEXT_KEY,
 	type CreateI18nOptions,
 	type I18nInstance
