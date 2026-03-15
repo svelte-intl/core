@@ -3,8 +3,8 @@ import { createI18n } from '$lib/index.js';
 export const load = async ({ data }) => {
 	const i18n = await createI18n({
 		locales: ['en', 'nl'],
-		locale: data.locale!,
-		fallbackLocale: 'en',
+		locale: data.locale,
+		fallbackLocale: 'nl',
 		dictionaries: {
 			en: async () => {
 				return (await import('$test/locales/en.json')).default;

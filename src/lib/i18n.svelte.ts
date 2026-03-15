@@ -4,6 +4,10 @@ import type { MaybePromise, OptionalParams } from './types.js';
 export type Dictionary =
 	| Record<string, string>
 	| (() => MaybePromise<Record<string, string>>);
+export type ExtendDictionaries<Locales extends string> = {
+	[K in Locales]?: Dictionary;
+};
+
 export type UnwrapDictionary<D extends Dictionary> =
 	D extends () => MaybePromise<infer R> ? R : D;
 
@@ -40,13 +44,23 @@ export type I18nInstance<
  */
 const loadDictionary = async <Locales extends string>(
 	locale: Locales,
-	dictionaries: Record<Locales, Dictionary>
+	dictionaries: Record<Locales, Dictionary>,
+	dictionariesExtensions?: ExtendDictionaries<Locales>
 ) => {
-	if (typeof dictionaries[locale] === 'function') {
-		return await dictionaries[locale]();
+	let extendedMessages: Record<string, string> | undefined;
+	if (dictionariesExtensions?.[locale]) {
+		if (typeof dictionariesExtensions[locale] === 'function') {
+			extendedMessages = await dictionariesExtensions[locale]();
+		} else {
+			extendedMessages = dictionariesExtensions[locale];
+		}
 	}
 
-	return dictionaries[locale];
+	if (typeof dictionaries[locale] === 'function') {
+		return { ...(await dictionaries[locale]()), ...extendedMessages };
+	}
+
+	return { ...dictionaries[locale], ...extendedMessages };
 };
 
 /**
@@ -113,9 +127,16 @@ export const createI18n = async <
 			options.fallbackLocale
 		)
 	);
+
+	let dictionariesExtensions: ExtendDictionaries<Locales> | undefined =
+		$state.raw();
 	let dictionaries = $state.raw(options.dictionaries);
 	let dictionary = $state.raw(
-		await loadDictionary(locale as Locales, options.dictionaries)
+		await loadDictionary(
+			locale as Locales,
+			options.dictionaries,
+			dictionariesExtensions
+		)
 	);
 
 	if (browser) {
@@ -140,7 +161,11 @@ export const createI18n = async <
 				locale = options.fallbackLocale ?? locales[0];
 			}
 
-			loadDictionary(locale as Locales, options.dictionaries)
+			loadDictionary(
+				locale as Locales,
+				options.dictionaries,
+				dictionariesExtensions
+			)
 				.then((loadedDictionary) => {
 					dictionary = loadedDictionary;
 				})
@@ -156,9 +181,13 @@ export const createI18n = async <
 		});
 	});
 
-	const t = <Key extends keyof UnwrapDictionary<Dictionaries[Locales]>>(
+	const t = <
+		Key extends keyof UnwrapDictionary<Dictionaries[Locales]> | (string & {})
+	>(
 		key: Key,
-		...args: OptionalParams<UnwrapDictionary<Dictionaries[Locales]>[Key], Key>
+		...args: Key extends keyof UnwrapDictionary<Dictionaries[Locales]>
+			? OptionalParams<UnwrapDictionary<Dictionaries[Locales]>[Key], Key>
+			: [params?: Record<string, string | number>]
 	) => {
 		// @ts-expect-error key mapping
 		let message: string | number = dictionary[key] || key;
@@ -174,6 +203,15 @@ export const createI18n = async <
 	};
 
 	const i18n = {
+		/**
+		 * The currently active locale. This is a reactive prop,
+		 * so you can update it at runtime if needed (e.g. to allow the user to switch languages).
+		 *
+		 * @readonly
+		 */
+		get locale() {
+			return locale;
+		},
 		/**
 		 * The list of supported locales. This can be used to, for example, render a language switcher in your application.
 		 * This is a reactive prop, so you can update it at runtime if needed (e.g. to fetch additional locales from an API).
@@ -333,7 +371,10 @@ export const createI18n = async <
 		 *
 		 * @see t
 		 */
-		_: t
+		_: t,
+		extend<D extends ExtendDictionaries<Locales>>(dictionaries: D) {
+			return (dictionariesExtensions = dictionaries);
+		}
 	};
 
 	return i18n;

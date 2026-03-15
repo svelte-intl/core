@@ -152,5 +152,6 @@
 	"Je hebt nog geen streak opgebouwd. Begin vandaag nog met oefenen!": "You haven't built a streak yet. Start practicing today!",
 	"Hello, {username}": "Good afternoon, {username}",
 	"Change locale": "Change locale",
-	"active_locale": "Current locale: {locale}"
+	"active_locale": "Current locale: {locale}",
+	"Switch language:": "Switch language:"
 }
