@@ -4,7 +4,7 @@ export const prerender = true;
 export const ssr = false;
 
 export const load = async ({ data }) => {
-	const { i18n } = await createI18n({
+	const i18n = await createI18n({
 		locales: ['en', 'nl'],
 		locale: data.locale!,
 		fallbackLocale: 'en',
