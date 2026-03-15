@@ -1,5 +1,15 @@
 # @svelte-i18n/core
 
+## 2.0.1
+
+### Patch Changes
+
+- c37b420: Add thumbnail
+- 1dd1b58: Update README.md
+- 550bfd6: Update readme.md
+- 9849b4f: Update README.md
+- 434f9c2: Update README.md
+
 ## 2.0.0
 
 ### Major Changes
