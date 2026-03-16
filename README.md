@@ -10,6 +10,13 @@
 
 ---
 
+## What this is not
+
+svelte-i18n is not intended to replace feature-rich libraries like Wuchale, inlang or Paraglide.js.
+Those solutions offer advanced capabilities for complex translation needs,
+such as deeply nested keys or managing large volumes of strings. Instead, svelte-i18n is
+designed for projects that require straightforward, key-value translations without extensive configuration or overhead.
+
 ## Getting Started
 
 ### 1. Install the package
