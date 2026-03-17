@@ -1,7 +1,8 @@
 import { createI18n } from '$lib/index.js';
+import type { I18nDictionary } from '../../i18n-types.d.ts';
 
 export const load = async ({ data }) => {
-	const i18n = await createI18n({
+	const i18n = await createI18n<I18nDictionary>({
 		locales: ['en', 'nl'],
 		locale: data.locale,
 		fallbackLocale: 'nl',

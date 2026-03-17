@@ -1,35 +1,30 @@
 import { browser } from '$app/environment';
-import type { MaybePromise, OptionalParams } from './types.js';
-
-export type Dictionary =
-	| Record<string, string>
-	| (() => MaybePromise<Record<string, string>>);
-export type ExtendDictionaries<Locales extends string> = {
-	[K in Locales]?: Dictionary;
-};
-
-export type UnwrapDictionary<D extends Dictionary> =
-	D extends () => MaybePromise<infer R> ? R : D;
+import type {
+	DictionaryResolver,
+	ExtendDictionaries,
+	InferDict,
+	MaybePromise,
+	OptionalParams,
+	UnwrapResolver
+} from './types.js';
 
 export type CreateI18nOptions<
 	Locales extends string,
-	Dictionaries extends Record<Locales, Dictionary>,
-	Locale extends Locales = Locales
+	Locale extends Locales = Locales,
+	Dicts extends Record<Locales, DictionaryResolver<Record<string, string>>> =
+		Record<Locales, DictionaryResolver<Record<string, string>>>
 > = {
 	locales: Locales[];
 	locale: Locale | (string & {});
-	dictionaries: Dictionaries;
+	dictionaries: Dicts;
 	fallbackLocale?: Locale;
 };
 
 export type I18nInstance<
+	Dictionary extends Record<string, string> = Record<string, string>,
 	Locales extends string = string,
-	Dictionaries extends Record<Locales, Dictionary> = Record<
-		Locales,
-		Dictionary
-	>,
 	Locale extends Locales = Locales
-> = Awaited<ReturnType<typeof createI18n<Locales, Dictionaries, Locale>>>;
+> = Awaited<ReturnType<typeof createI18n<Dictionary, Locales, Locale>>>;
 
 /**
  * Loads the dictionary for the specified locale.
@@ -42,9 +37,12 @@ export type I18nInstance<
  *
  * @returns The loaded dictionary for the specified locale
  */
-const loadDictionary = async <Locales extends string>(
+const loadDictionary = async <
+	Dictionary extends Record<string, string>,
+	Locales extends string
+>(
 	locale: Locales,
-	dictionaries: Record<Locales, Dictionary>,
+	dictionaries: Record<Locales, DictionaryResolver<Dictionary>>,
 	dictionariesExtensions?: ExtendDictionaries<Locales>
 ) => {
 	let extendedMessages: Record<string, string> | undefined;
@@ -112,12 +110,22 @@ const getLocale = (
  */
 export const I18N_CONTEXT_KEY = Symbol('i18n');
 export const createI18n = async <
-	Locales extends string,
-	Dictionaries extends Record<Locales, Dictionary>,
-	Locale extends Locales = Locales
+	Dictionary extends Record<string, string> | InferDict = InferDict,
+	Locales extends string = string,
+	Locale extends Locales = Locales,
+	Dicts extends Record<Locales, DictionaryResolver<Record<string, string>>> =
+		Record<Locales, DictionaryResolver<Record<string, string>>>
 >(
-	options: CreateI18nOptions<Locales, Dictionaries, Locale>
+	options: CreateI18nOptions<Locales, Locale, Dicts>
 ) => {
+	type EffectiveDictionary = [Dictionary] extends [InferDict]
+		? UnwrapResolver<Dicts[Locales]> extends Record<string, string>
+			? UnwrapResolver<Dicts[Locales]>
+			: Record<string, string>
+		: Dictionary extends Record<string, string>
+			? Dictionary
+			: Record<string, string>;
+
 	let loading = $state(true);
 	let locales = $state(options.locales);
 	let locale = $state.raw(
@@ -181,16 +189,15 @@ export const createI18n = async <
 		});
 	});
 
-	const t = <
-		Key extends keyof UnwrapDictionary<Dictionaries[Locales]> | (string & {})
-	>(
+	const t = <Key extends keyof EffectiveDictionary | (string & {})>(
 		key: Key,
-		...args: Key extends keyof UnwrapDictionary<Dictionaries[Locales]>
-			? OptionalParams<UnwrapDictionary<Dictionaries[Locales]>[Key], Key>
+		...args: Key extends keyof EffectiveDictionary
+			? OptionalParams<EffectiveDictionary[Key], Key>
 			: [params?: Record<string, string | number>]
 	) => {
-		// @ts-expect-error key mapping
+		// @ts-ignore
 		let message: string | number = dictionary[key] || key;
+		// @ts-ignore
 		let params = args[0] as Record<string, string | number> | undefined;
 
 		if (params) {
