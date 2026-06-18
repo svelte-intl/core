@@ -1,5 +1,11 @@
 # @svelte-i18n/core
 
+## 3.0.1
+
+### Patch Changes
+
+- c221add: remove empty changeset
+
 ## 3.0.0
 
 ### Major Changes
