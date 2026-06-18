@@ -27,7 +27,21 @@ npm install @svelte-i18n/core
 pnpm add @svelte-i18n/core
 ```
 
-### 2. `src/routes/+layout.ts`
+### 2. `src/routes/+layout.server.ts`
+
+Read the locale cookie on the server so the user's language preference survives a page refresh.
+
+```ts
+export const load = async ({ cookies }) => {
+	const locale = cookies.get('lang');
+
+	return {
+		locale: locale ?? 'en'
+	};
+};
+```
+
+### 3. `src/routes/+layout.ts`
 
 Edit the `+layout.ts` file or create it if it doesn't exist.
 
@@ -37,7 +51,7 @@ import { createI18n } from '@svelte-i18n/core';
 export const load = async ({ data }) => {
 	const i18n = await createI18n({
 		locales: ['en', 'nl'],
-		locale: 'en',
+		locale: data.locale,
 		fallbackLocale: 'en',
 		dictionaries: {
 			// You can also import them at the top level
@@ -57,7 +71,40 @@ export const load = async ({ data }) => {
 };
 ```
 
-### 3. `src/routes/+layout.svelte`
+`setLocale` stores the active locale in a cookie named `lang` by default. Override the name with `cookieName`:
+
+```ts
+const i18n = await createI18n({
+	// ...
+	cookieName: 'locale'
+});
+```
+
+### 4. `src/app.html` and `src/hooks.server.ts`
+
+Set the HTML `lang` attribute for SSR:
+
+```html
+<!-- src/app.html -->
+<html lang="%lang%">
+```
+
+```ts
+// src/hooks.server.ts
+import type { Handle } from '@sveltejs/kit';
+
+export const handle: Handle = async ({ event, resolve }) => {
+	const locale = event.cookies.get('lang');
+
+	return resolve(event, {
+		transformPageChunk: ({ html }) => html.replace('%lang%', locale ?? 'en')
+	});
+};
+```
+
+On the client, `setLocale` also updates `document.documentElement.lang` when the user switches language.
+
+### 5. `src/routes/+layout.svelte`
 
 Export `I18nContext` so the i18n context type can be shared across the app.
 
@@ -75,7 +122,7 @@ Export `I18nContext` so the i18n context type can be shared across the app.
 {@render children?.()}
 ```
 
-### 4. `src/lib/i18n.ts`
+### 6. `src/lib/i18n.ts`
 
 Create a new file called `i18n.ts` inside `src/lib`. This sets up and exports the context so it can be reused across the app with full type safety.
 
@@ -89,7 +136,7 @@ export const useI18n = getContext;
 export const createI18n = (i18n: () => I18nContext) => setContext(i18n());
 ```
 
-### 5. Register the context in `+layout.svelte`
+### 7. Register the context in `+layout.svelte`
 
 ```svelte
 <script lang="ts" module>
@@ -107,7 +154,7 @@ export const createI18n = (i18n: () => I18nContext) => setContext(i18n());
 {@render children?.()}
 ```
 
-### 6. Use it in any component
+### 8. Use it in any component
 
 ```svelte
 <script lang="ts">

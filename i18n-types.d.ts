@@ -154,6 +154,4 @@ export type I18nDictionary = {
     'Change locale': string;
     'active_locale': string;
     'Switch language:': string;
-    'Documentation': string;
-    'Here you can find the documentation for ...': string;
 };

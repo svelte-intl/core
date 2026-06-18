@@ -1,12 +1,7 @@
-export const load = async ({ request }) => {
-	const locale = request.headers
-		.get('accept-language')
-		?.split(',')[0]
-		.split('-')[0];
-
-	console.log(locale);
+export const load = async ({ request, cookies }) => {
+	const locale = cookies.get('lang');
 
 	return {
-		locale: 'nl'
+		locale: locale ?? 'nl'
 	};
 };

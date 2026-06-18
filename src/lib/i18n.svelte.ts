@@ -1,4 +1,5 @@
 import { browser } from '$app/environment';
+import { getRequestEvent } from '$app/server';
 import type {
 	DictionaryResolver,
 	ExtendDictionaries,
@@ -18,6 +19,8 @@ export type CreateI18nOptions<
 	locale: Locale | (string & {});
 	dictionaries: Dicts;
 	fallbackLocale?: Locale;
+	/** Cookie name used when persisting the locale via `setLocale`. Defaults to `lang`. */
+	cookieName?: string;
 };
 
 export type I18nInstance<
@@ -153,6 +156,7 @@ export const createI18n = async <
 
 	$effect.root(() => {
 		$effect(() => {
+			$inspect(dictionariesExtensions);
 			// Prevents the loading state from being set to true on the initial load, which can cause a flash of loading indicators in the UI.
 			// By deferring the setting of the loading state until after the initial render,
 			// we ensure that the loading indicator only appears when the locale is actually being changed by the user,
@@ -169,6 +173,7 @@ export const createI18n = async <
 				locale = options.fallbackLocale ?? locales[0];
 			}
 
+			// Make sure we only trigger on locale change
 			loadDictionary(
 				locale as Locales,
 				options.dictionaries,
@@ -195,9 +200,9 @@ export const createI18n = async <
 			? OptionalParams<EffectiveDictionary[Key], Key>
 			: [params?: Record<string, string | number>]
 	) => {
-		// @ts-ignore
+		// @ts-expect-error key mapping
 		let message: string | number = dictionary[key] || key;
-		// @ts-ignore
+		// @ts-expect-error params mapping
 		let params = args[0] as Record<string, string | number> | undefined;
 
 		if (params) {
@@ -273,6 +278,7 @@ export const createI18n = async <
 		},
 		/**
 		 * Sets the currently active locale. This will cause all components that use the `t` function to re-render with the new locale.
+		 * In the browser, this also stores the locale in a cookie (see `cookieName` option) and updates `document.documentElement.lang`.
 		 *
 		 * @param newLocale - The new locale to set. This should be one of the locales defined in the `locales` prop.
 		 * @example
@@ -285,6 +291,16 @@ export const createI18n = async <
 		 */
 		setLocale(newLocale: Locales) {
 			locale = newLocale as Locale;
+
+			if (browser) {
+				document.cookie = `${options.cookieName ?? 'lang'}=${newLocale};path=/;max-age=31536000;SameSite=Lax`;
+			}
+
+			$effect.root(() => {
+				$effect(() => {
+					document.documentElement.lang = newLocale;
+				});
+			})
 		},
 		/**
 		 * Gets the currently active locale.
@@ -379,6 +395,37 @@ export const createI18n = async <
 		 * @see t
 		 */
 		_: t,
+		/**
+		 * Extends the existing dictionaries with additional messages for one or more locales.
+		 *
+		 * This is useful for cases where you want to add translations dynamically at runtime,
+		 * such as when loading additional messages from an API or when allowing users to contribute translations.
+		 *
+		 * The `dictionaries` parameter should be an object where the keys are locale identifiers (e.g. "en", "nl") and the values are either:
+		 * - An object containing the additional messages for that locale, or
+		 * - A function that returns a promise which resolves to the additional messages for that locale (e.g. an async function that fetches translations from an API).
+		 *
+		 * When you call this method, it will merge the provided additional messages with the existing dictionary for each specified locale.
+		 * If the same message key exists in both the existing dictionary and the additional messages, the value from the additional messages will take precedence.
+		 *
+		 * @returns The i18n instance, allowing for method chaining.
+		 * @example
+		 * import { useI18n } from '$lib/i18n';
+		 *
+		 * const { extend } = useI18n();
+		 *
+		 * // Extend the dictionaries with additional messages for English and Dutch
+		 * extend({
+		 *   en: {
+		 *     welcome: "Welcome to our application!"
+		 *   },
+		 *   nl: async () => {
+		 *     const response = await fetch('/api/translations/nl');
+		 *     const data = await response.json();
+		 *     return data;
+		 *   }
+		 * });
+		 */
 		extend<D extends ExtendDictionaries<Locales>>(dictionaries: D) {
 			return (dictionariesExtensions = dictionaries);
 		}
