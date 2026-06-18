@@ -1,5 +1,15 @@
 # @svelte-i18n/core
 
+## 3.0.0
+
+### Major Changes
+
+- 2d42957: feat; new extend functionality to use fine grained translations
+
+### Minor Changes
+
+- ed8f36d: feat [#12]; save locale in cookie and update HTML lang attr on locale change
+
 ## 2.0.1
 
 ### Patch Changes
