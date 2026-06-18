@@ -3,6 +3,11 @@ import { createI18n } from '../lib/i18n.svelte.ts';
 
 vi.mock('$app/environment', () => ({ browser: true }));
 
+vi.stubGlobal('document', {
+	cookie: '',
+	documentElement: { lang: 'en' }
+});
+
 const en = {
 	hello: 'Hello',
 	greeting: 'Hello, {name}!',
@@ -36,6 +41,7 @@ describe('createI18n', () => {
 			expect(i18n).toHaveProperty('locales');
 			expect(i18n).toHaveProperty('dictionaries');
 			expect(i18n).toHaveProperty('dictionary');
+			expect(i18n).toHaveProperty('extend');
 		});
 
 		it('sets the correct locale on initialization', async () => {
@@ -316,6 +322,87 @@ describe('createI18n', () => {
 			expect(i18n.getLocale()).toBe('nl');
 			i18n.setLocale('en');
 			expect(i18n.getLocale()).toBe('en');
+		});
+	});
+
+	describe('extend', () => {
+		it('adds messages for the active locale', async () => {
+			const i18n = await createI18n({
+				locales: ['en', 'nl'],
+				locale: 'en',
+				dictionaries: makeDictionaries()
+			});
+
+			await i18n.extend({
+				en: { welcome: 'Welcome!' }
+			});
+
+			expect(i18n.t('welcome')).toBe('Welcome!');
+			expect(i18n.t('hello')).toBe('Hello');
+		});
+
+		it('returns the i18n instance for chaining', async () => {
+			const i18n = await createI18n({
+				locales: ['en', 'nl'],
+				locale: 'en',
+				dictionaries: makeDictionaries()
+			});
+
+			const result = await i18n.extend({ en: { welcome: 'Welcome!' } });
+			expect(result).toBe(i18n);
+		});
+
+		it('accumulates multiple extend calls', async () => {
+			const i18n = await createI18n({
+				locales: ['en', 'nl'],
+				locale: 'en',
+				dictionaries: makeDictionaries()
+			});
+
+			await i18n.extend({ en: { welcome: 'Welcome!' } });
+			await i18n.extend({ en: { subtitle: 'Getting started' } });
+
+			expect(i18n.t('welcome')).toBe('Welcome!');
+			expect(i18n.t('subtitle')).toBe('Getting started');
+		});
+
+		it('lets later extend calls override the same key', async () => {
+			const i18n = await createI18n({
+				locales: ['en', 'nl'],
+				locale: 'en',
+				dictionaries: makeDictionaries()
+			});
+
+			await i18n.extend({ en: { welcome: 'Welcome!' } });
+			await i18n.extend({ en: { welcome: 'Welcome back!' } });
+
+			expect(i18n.t('welcome')).toBe('Welcome back!');
+		});
+
+		it('supports async extend loaders', async () => {
+			const loader = vi.fn().mockResolvedValue({ welcome: 'Welcome!' });
+			const i18n = await createI18n({
+				locales: ['en', 'nl'],
+				locale: 'en',
+				dictionaries: makeDictionaries()
+			});
+
+			await i18n.extend({ en: loader });
+
+			expect(loader).toHaveBeenCalled();
+			expect(i18n.t('welcome')).toBe('Welcome!');
+		});
+
+		it('extension overrides base dictionary keys', async () => {
+			const i18n = await createI18n({
+				locales: ['en', 'nl'],
+				locale: 'en',
+				dictionaries: makeDictionaries()
+			});
+
+			await i18n.extend({ en: { hello: 'Hi there' } });
+
+			expect(i18n.t('hello')).toBe('Hi there');
 		});
 	});
 });

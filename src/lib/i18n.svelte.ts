@@ -1,31 +1,64 @@
 import { browser } from '$app/environment';
-import type { MaybePromise, OptionalParams } from './types.js';
+import type {
+	DictionaryResolver,
+	ExtendDictionaries,
+	InferDict,
+	OptionalParams,
+	UnwrapResolver
+} from './types.js';
 
-export type Dictionary =
-	| Record<string, string>
-	| (() => MaybePromise<Record<string, string>>);
-export type UnwrapDictionary<D extends Dictionary> =
-	D extends () => MaybePromise<infer R> ? R : D;
+type ExtensionLayers<Locales extends string> = Partial<
+	Record<Locales, DictionaryResolver<Record<string, string>>[]>
+>;
+
+const appendExtensions = <Locales extends string>(
+	current: ExtensionLayers<Locales> | undefined,
+	incoming: ExtendDictionaries<Locales>
+): ExtensionLayers<Locales> => {
+	const merged: ExtensionLayers<Locales> = { ...current };
+
+	for (const key of Object.keys(incoming) as Locales[]) {
+		const value = incoming[key];
+		if (value === undefined) continue;
+		merged[key] = [...(merged[key] ?? []), value];
+	}
+
+	return merged;
+};
+
+const resolveExtensions = async <Locales extends string>(
+	locale: Locales,
+	extensions?: ExtensionLayers<Locales>
+) => {
+	let merged: Record<string, string> = {};
+
+	for (const entry of extensions?.[locale] ?? []) {
+		const chunk = typeof entry === 'function' ? await entry() : entry;
+		merged = { ...merged, ...chunk };
+	}
+
+	return merged;
+};
 
 export type CreateI18nOptions<
 	Locales extends string,
-	Dictionaries extends Record<Locales, Dictionary>,
-	Locale extends Locales = Locales
+	Locale extends Locales = Locales,
+	Dicts extends Record<Locales, DictionaryResolver<Record<string, string>>> =
+		Record<Locales, DictionaryResolver<Record<string, string>>>
 > = {
 	locales: Locales[];
 	locale: Locale | (string & {});
-	dictionaries: Dictionaries;
+	dictionaries: Dicts;
 	fallbackLocale?: Locale;
+	/** Cookie name used when persisting the locale via `setLocale`. Defaults to `lang`. */
+	cookieName?: string;
 };
 
 export type I18nInstance<
+	Dictionary extends Record<string, string> = Record<string, string>,
 	Locales extends string = string,
-	Dictionaries extends Record<Locales, Dictionary> = Record<
-		Locales,
-		Dictionary
-	>,
 	Locale extends Locales = Locales
-> = Awaited<ReturnType<typeof createI18n<Locales, Dictionaries, Locale>>>;
+> = Awaited<ReturnType<typeof createI18n<Dictionary, Locales, Locale>>>;
 
 /**
  * Loads the dictionary for the specified locale.
@@ -38,15 +71,21 @@ export type I18nInstance<
  *
  * @returns The loaded dictionary for the specified locale
  */
-const loadDictionary = async <Locales extends string>(
+const loadDictionary = async <
+	Dictionary extends Record<string, string>,
+	Locales extends string
+>(
 	locale: Locales,
-	dictionaries: Record<Locales, Dictionary>
+	dictionaries: Record<Locales, DictionaryResolver<Dictionary>>,
+	dictionariesExtensions?: ExtensionLayers<Locales>
 ) => {
+	const extendedMessages = await resolveExtensions(locale, dictionariesExtensions);
+
 	if (typeof dictionaries[locale] === 'function') {
-		return await dictionaries[locale]();
+		return { ...(await dictionaries[locale]()), ...extendedMessages };
 	}
 
-	return dictionaries[locale];
+	return { ...dictionaries[locale], ...extendedMessages };
 };
 
 /**
@@ -98,24 +137,71 @@ const getLocale = (
  */
 export const I18N_CONTEXT_KEY = Symbol('i18n');
 export const createI18n = async <
-	Locales extends string,
-	Dictionaries extends Record<Locales, Dictionary>,
-	Locale extends Locales = Locales
+	Dictionary extends Record<string, string> | InferDict = InferDict,
+	Locales extends string = string,
+	Locale extends Locales = Locales,
+	Dicts extends Record<Locales, DictionaryResolver<Record<string, string>>> =
+		Record<Locales, DictionaryResolver<Record<string, string>>>
 >(
-	options: CreateI18nOptions<Locales, Dictionaries, Locale>
+	options: CreateI18nOptions<Locales, Locale, Dicts>
 ) => {
+	type EffectiveDictionary = [Dictionary] extends [InferDict]
+		? UnwrapResolver<Dicts[Locales]> extends Record<string, string>
+			? UnwrapResolver<Dicts[Locales]>
+			: Record<string, string>
+		: Dictionary extends Record<string, string>
+			? Dictionary
+			: Record<string, string>;
+
 	let loading = $state(true);
 	let locales = $state(options.locales);
-	let locale = $state.raw(
-		getLocale(
-			options.locale as Locales,
-			options.locales,
-			options.fallbackLocale
-		)
+	const initialLocale = getLocale(
+		options.locale as Locales,
+		options.locales,
+		options.fallbackLocale
 	);
+	let locale = $state.raw(initialLocale);
+
+	let dictionariesExtensions: ExtensionLayers<Locales> | undefined =
+		$state.raw();
 	let dictionaries = $state.raw(options.dictionaries);
+	let loadGeneration = 0;
+
+	const reloadDictionary = async () => {
+		const generation = ++loadGeneration;
+		loading = true;
+
+		try {
+			const loadedDictionary = await loadDictionary(
+				locale as Locales,
+				options.dictionaries,
+				dictionariesExtensions
+			);
+
+			if (generation === loadGeneration) {
+				dictionary = loadedDictionary;
+			}
+
+			return loadedDictionary;
+		} catch (error) {
+			console.error(
+				`Failed to load dictionary for locale "${locale}":`,
+				error
+			);
+			throw error;
+		} finally {
+			if (generation === loadGeneration) {
+				loading = false;
+			}
+		}
+	};
+
 	let dictionary = $state.raw(
-		await loadDictionary(locale as Locales, options.dictionaries)
+		await loadDictionary(
+			initialLocale as Locales,
+			options.dictionaries,
+			undefined
+		)
 	);
 
 	if (browser) {
@@ -123,7 +209,16 @@ export const createI18n = async <
 	}
 
 	$effect.root(() => {
+		let initial = true;
+
 		$effect(() => {
+			locale;
+
+			if (initial) {
+				initial = false;
+				return;
+			}
+
 			// Prevents the loading state from being set to true on the initial load, which can cause a flash of loading indicators in the UI.
 			// By deferring the setting of the loading state until after the initial render,
 			// we ensure that the loading indicator only appears when the locale is actually being changed by the user,
@@ -140,28 +235,19 @@ export const createI18n = async <
 				locale = options.fallbackLocale ?? locales[0];
 			}
 
-			loadDictionary(locale as Locales, options.dictionaries)
-				.then((loadedDictionary) => {
-					dictionary = loadedDictionary;
-				})
-				.catch((error) => {
-					console.error(
-						`Failed to load dictionary for locale "${locale}":`,
-						error
-					);
-				})
-				.finally(() => {
-					loading = false;
-				});
+			void reloadDictionary();
 		});
 	});
 
-	const t = <Key extends keyof UnwrapDictionary<Dictionaries[Locales]>>(
+	const t = <Key extends keyof EffectiveDictionary | (string & {})>(
 		key: Key,
-		...args: OptionalParams<UnwrapDictionary<Dictionaries[Locales]>[Key], Key>
+		...args: Key extends keyof EffectiveDictionary
+			? OptionalParams<EffectiveDictionary[Key], Key>
+			: [params?: Record<string, string | number>]
 	) => {
 		// @ts-expect-error key mapping
 		let message: string | number = dictionary[key] || key;
+		// @ts-expect-error params mapping
 		let params = args[0] as Record<string, string | number> | undefined;
 
 		if (params) {
@@ -174,6 +260,15 @@ export const createI18n = async <
 	};
 
 	const i18n = {
+		/**
+		 * The currently active locale. This is a reactive prop,
+		 * so you can update it at runtime if needed (e.g. to allow the user to switch languages).
+		 *
+		 * @readonly
+		 */
+		get locale() {
+			return locale;
+		},
 		/**
 		 * The list of supported locales. This can be used to, for example, render a language switcher in your application.
 		 * This is a reactive prop, so you can update it at runtime if needed (e.g. to fetch additional locales from an API).
@@ -228,6 +323,7 @@ export const createI18n = async <
 		},
 		/**
 		 * Sets the currently active locale. This will cause all components that use the `t` function to re-render with the new locale.
+		 * In the browser, this also stores the locale in a cookie (see `cookieName` option) and updates `document.documentElement.lang`.
 		 *
 		 * @param newLocale - The new locale to set. This should be one of the locales defined in the `locales` prop.
 		 * @example
@@ -240,6 +336,11 @@ export const createI18n = async <
 		 */
 		setLocale(newLocale: Locales) {
 			locale = newLocale as Locale;
+
+			if (browser) {
+				document.cookie = `${options.cookieName ?? 'lang'}=${newLocale};path=/;max-age=31536000;SameSite=Lax`;
+				document.documentElement.lang = newLocale;
+			}
 		},
 		/**
 		 * Gets the currently active locale.
@@ -333,7 +434,47 @@ export const createI18n = async <
 		 *
 		 * @see t
 		 */
-		_: t
+		_: t,
+		/**
+		 * Extends the existing dictionaries with additional messages for one or more locales.
+		 *
+		 * This is useful for cases where you want to add translations dynamically at runtime,
+		 * such as when loading additional messages from an API or when allowing users to contribute translations.
+		 *
+		 * The `dictionaries` parameter should be an object where the keys are locale identifiers (e.g. "en", "nl") and the values are either:
+		 * - An object containing the additional messages for that locale, or
+		 * - A function that returns a promise which resolves to the additional messages for that locale (e.g. an async function that fetches translations from an API).
+		 *
+		 * When you call this method, it will merge the provided additional messages with the existing dictionary for each specified locale.
+		 * If the same message key exists in both the existing dictionary and the additional messages, the value from the additional messages will take precedence.
+		 * Multiple calls to `extend` are accumulated; later values override earlier ones for the same key.
+		 *
+		 * @returns A promise that resolves to the i18n instance, allowing for method chaining.
+		 * @example
+		 * import { useI18n } from '$lib/i18n';
+		 *
+		 * const { extend } = useI18n();
+		 *
+		 * // Extend the dictionaries with additional messages for English and Dutch
+		 * await extend({
+		 *   en: {
+		 *     welcome: "Welcome to our application!"
+		 *   },
+		 *   nl: async () => {
+		 *     const response = await fetch('/api/translations/nl');
+		 *     const data = await response.json();
+		 *     return data;
+		 *   }
+		 * });
+		 */
+		async extend<D extends ExtendDictionaries<Locales>>(dictionaries: D) {
+			dictionariesExtensions = appendExtensions(
+				dictionariesExtensions,
+				dictionaries
+			);
+			await reloadDictionary();
+			return i18n;
+		}
 	};
 
 	return i18n;
