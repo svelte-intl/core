@@ -1,13 +1,44 @@
 import { browser } from '$app/environment';
-import { getRequestEvent } from '$app/server';
 import type {
 	DictionaryResolver,
 	ExtendDictionaries,
 	InferDict,
-	MaybePromise,
 	OptionalParams,
 	UnwrapResolver
 } from './types.js';
+
+type ExtensionLayers<Locales extends string> = Partial<
+	Record<Locales, DictionaryResolver<Record<string, string>>[]>
+>;
+
+const appendExtensions = <Locales extends string>(
+	current: ExtensionLayers<Locales> | undefined,
+	incoming: ExtendDictionaries<Locales>
+): ExtensionLayers<Locales> => {
+	const merged: ExtensionLayers<Locales> = { ...current };
+
+	for (const key of Object.keys(incoming) as Locales[]) {
+		const value = incoming[key];
+		if (value === undefined) continue;
+		merged[key] = [...(merged[key] ?? []), value];
+	}
+
+	return merged;
+};
+
+const resolveExtensions = async <Locales extends string>(
+	locale: Locales,
+	extensions?: ExtensionLayers<Locales>
+) => {
+	let merged: Record<string, string> = {};
+
+	for (const entry of extensions?.[locale] ?? []) {
+		const chunk = typeof entry === 'function' ? await entry() : entry;
+		merged = { ...merged, ...chunk };
+	}
+
+	return merged;
+};
 
 export type CreateI18nOptions<
 	Locales extends string,
@@ -46,16 +77,9 @@ const loadDictionary = async <
 >(
 	locale: Locales,
 	dictionaries: Record<Locales, DictionaryResolver<Dictionary>>,
-	dictionariesExtensions?: ExtendDictionaries<Locales>
+	dictionariesExtensions?: ExtensionLayers<Locales>
 ) => {
-	let extendedMessages: Record<string, string> | undefined;
-	if (dictionariesExtensions?.[locale]) {
-		if (typeof dictionariesExtensions[locale] === 'function') {
-			extendedMessages = await dictionariesExtensions[locale]();
-		} else {
-			extendedMessages = dictionariesExtensions[locale];
-		}
-	}
+	const extendedMessages = await resolveExtensions(locale, dictionariesExtensions);
 
 	if (typeof dictionaries[locale] === 'function') {
 		return { ...(await dictionaries[locale]()), ...extendedMessages };
@@ -131,22 +155,52 @@ export const createI18n = async <
 
 	let loading = $state(true);
 	let locales = $state(options.locales);
-	let locale = $state.raw(
-		getLocale(
-			options.locale as Locales,
-			options.locales,
-			options.fallbackLocale
-		)
+	const initialLocale = getLocale(
+		options.locale as Locales,
+		options.locales,
+		options.fallbackLocale
 	);
+	let locale = $state.raw(initialLocale);
 
-	let dictionariesExtensions: ExtendDictionaries<Locales> | undefined =
+	let dictionariesExtensions: ExtensionLayers<Locales> | undefined =
 		$state.raw();
 	let dictionaries = $state.raw(options.dictionaries);
+	let loadGeneration = 0;
+
+	const reloadDictionary = async () => {
+		const generation = ++loadGeneration;
+		loading = true;
+
+		try {
+			const loadedDictionary = await loadDictionary(
+				locale as Locales,
+				options.dictionaries,
+				dictionariesExtensions
+			);
+
+			if (generation === loadGeneration) {
+				dictionary = loadedDictionary;
+			}
+
+			return loadedDictionary;
+		} catch (error) {
+			console.error(
+				`Failed to load dictionary for locale "${locale}":`,
+				error
+			);
+			throw error;
+		} finally {
+			if (generation === loadGeneration) {
+				loading = false;
+			}
+		}
+	};
+
 	let dictionary = $state.raw(
 		await loadDictionary(
-			locale as Locales,
+			initialLocale as Locales,
 			options.dictionaries,
-			dictionariesExtensions
+			undefined
 		)
 	);
 
@@ -155,8 +209,16 @@ export const createI18n = async <
 	}
 
 	$effect.root(() => {
+		let initial = true;
+
 		$effect(() => {
-			$inspect(dictionariesExtensions);
+			locale;
+
+			if (initial) {
+				initial = false;
+				return;
+			}
+
 			// Prevents the loading state from being set to true on the initial load, which can cause a flash of loading indicators in the UI.
 			// By deferring the setting of the loading state until after the initial render,
 			// we ensure that the loading indicator only appears when the locale is actually being changed by the user,
@@ -173,24 +235,7 @@ export const createI18n = async <
 				locale = options.fallbackLocale ?? locales[0];
 			}
 
-			// Make sure we only trigger on locale change
-			loadDictionary(
-				locale as Locales,
-				options.dictionaries,
-				dictionariesExtensions
-			)
-				.then((loadedDictionary) => {
-					dictionary = loadedDictionary;
-				})
-				.catch((error) => {
-					console.error(
-						`Failed to load dictionary for locale "${locale}":`,
-						error
-					);
-				})
-				.finally(() => {
-					loading = false;
-				});
+			void reloadDictionary();
 		});
 	});
 
@@ -294,13 +339,8 @@ export const createI18n = async <
 
 			if (browser) {
 				document.cookie = `${options.cookieName ?? 'lang'}=${newLocale};path=/;max-age=31536000;SameSite=Lax`;
+				document.documentElement.lang = newLocale;
 			}
-
-			$effect.root(() => {
-				$effect(() => {
-					document.documentElement.lang = newLocale;
-				});
-			})
 		},
 		/**
 		 * Gets the currently active locale.
@@ -407,15 +447,16 @@ export const createI18n = async <
 		 *
 		 * When you call this method, it will merge the provided additional messages with the existing dictionary for each specified locale.
 		 * If the same message key exists in both the existing dictionary and the additional messages, the value from the additional messages will take precedence.
+		 * Multiple calls to `extend` are accumulated; later values override earlier ones for the same key.
 		 *
-		 * @returns The i18n instance, allowing for method chaining.
+		 * @returns A promise that resolves to the i18n instance, allowing for method chaining.
 		 * @example
 		 * import { useI18n } from '$lib/i18n';
 		 *
 		 * const { extend } = useI18n();
 		 *
 		 * // Extend the dictionaries with additional messages for English and Dutch
-		 * extend({
+		 * await extend({
 		 *   en: {
 		 *     welcome: "Welcome to our application!"
 		 *   },
@@ -426,8 +467,13 @@ export const createI18n = async <
 		 *   }
 		 * });
 		 */
-		extend<D extends ExtendDictionaries<Locales>>(dictionaries: D) {
-			return (dictionariesExtensions = dictionaries);
+		async extend<D extends ExtendDictionaries<Locales>>(dictionaries: D) {
+			dictionariesExtensions = appendExtensions(
+				dictionariesExtensions,
+				dictionaries
+			);
+			await reloadDictionary();
+			return i18n;
 		}
 	};
 
