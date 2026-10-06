@@ -139,7 +139,7 @@ async function processSources(
 	for (const paths of Object.values(importPaths)) {
 		for (const p of paths) {
 			try {
-				// Use Vite's resolver so aliases like $test/* are expanded correctly.
+				// Use Vite's resolver so aliases like #test/* are expanded correctly.
 				const resolved = await resolveId(p, id);
 				const absPath = resolved?.id ?? resolve(dirname(id), p);
 				const json = JSON.parse(readFileSync(absPath, 'utf-8'));

@@ -1,4 +1,4 @@
-import { browser } from '$app/environment';
+import { BROWSER as browser } from 'esm-env';
 import type {
 	DictionaryResolver,
 	ExtendDictionaries,
@@ -130,8 +130,8 @@ const getLocale = (
  * @internal
  * @example
  * import { setContext } from 'svelte';
- * import { I18N_CONTEXT_KEY } from '$lib/i18n';
- * import { i18n } from '$lib/i18n';
+ * import { I18N_CONTEXT_KEY } from '#lib/i18n';
+ * import { i18n } from '#lib/i18n';
  *
  * setContext(I18N_CONTEXT_KEY, i18n);
  */
@@ -278,7 +278,7 @@ export const createI18n = async <
 		 *
 		 * @readonly
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 *
 		 * const { locales, setLocale } = useI18n();
 		 *
@@ -327,7 +327,7 @@ export const createI18n = async <
 		 *
 		 * @param newLocale - The new locale to set. This should be one of the locales defined in the `locales` prop.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 *
 		 * const { setLocale } = useI18n();
 		 *
@@ -350,7 +350,7 @@ export const createI18n = async <
 		 *
 		 * @returns The currently active locale.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 *
 		 * const { getLocale } = useI18n();
 		 *
@@ -370,7 +370,7 @@ export const createI18n = async <
 		 *
 		 * @returns An array of supported locales.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 * const { getLocales } = useI18n();
 		 *
 		 * <p>Supported locales: {getLocales().join(', ')}</p>
@@ -384,7 +384,7 @@ export const createI18n = async <
 		 *
 		 * @returns A boolean indicating whether the i18n instance is currently loading the dictionary.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 * const { getLoading } = useI18n();
 		 *
 		 * {#if getLoading()}
@@ -404,7 +404,7 @@ export const createI18n = async <
 		 * @param params - An optional object of parameters to replace in the message. The keys in this object should correspond to the placeholders in the message string (e.g. `{name}`), and the values will be substituted into the message.
 		 * @returns The translated message with parameters substituted, or the key itself if no translation is found.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 *
 		 * const { t } = useI18n();
 		 *
@@ -421,7 +421,7 @@ export const createI18n = async <
 		 *
 		 * @returns The fallback locale defined in the i18n options, or undefined if no fallback locale is set.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 * const { getFallbackLocale } = useI18n();
 		 *
 		 * <p>Fallback locale: {getFallbackLocale() ?? 'None'}</p>
@@ -451,7 +451,7 @@ export const createI18n = async <
 		 *
 		 * @returns A promise that resolves to the i18n instance, allowing for method chaining.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 *
 		 * const { extend } = useI18n();
 		 *

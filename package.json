@@ -50,10 +50,11 @@
 		"@changesets/cli": "^2.30.0",
 		"@eslint/compat": "^2.0.3",
 		"@eslint/js": "^9.39.4",
-		"@sveltejs/adapter-auto": "^7.0.1",
-		"@sveltejs/kit": "^2.55.0",
-		"@sveltejs/package": "^2.5.7",
-		"@sveltejs/vite-plugin-svelte": "^6.2.4",
+		"@sveltejs/adapter-auto": "^8.0.0",
+		"@sveltejs/kit": "^3.0.0",
+		"@sveltejs/load-config": "^0.2.2",
+		"@sveltejs/package": "^3.0.0",
+		"@sveltejs/vite-plugin-svelte": "^7.0.0",
 		"@tailwindcss/vite": "^4.2.1",
 		"@types/estree": "^1.0.8",
 		"@types/node": "^24.12.0",
@@ -66,15 +67,23 @@
 		"prettier-plugin-tailwindcss": "^0.7.2",
 		"publint": "^0.3.18",
 		"rollup": "^4.59.0",
-		"svelte": "^5.53.12",
-		"svelte-check": "^4.4.5",
+		"svelte": "^5.57.1",
+		"svelte-check": "^4.7.5",
 		"tailwindcss": "^4.2.1",
-		"typescript": "^5.9.3",
+		"typescript": "^6.0.0",
 		"typescript-eslint": "^8.57.0",
-		"vite": "^7.3.1",
+		"vite": "^8.0.12",
 		"vitest": "^4.1.0"
 	},
 	"keywords": [
 		"svelte"
-	]
+	],
+	"imports": {
+		"#lib": "./src/lib/index.js",
+		"#lib/*": "./src/lib/*",
+		"#test/*": "./src/test/*"
+	},
+	"dependencies": {
+		"esm-env": "^1.2.2"
+	}
 }

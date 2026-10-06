@@ -57,10 +57,10 @@ export const load = async ({ data }) => {
 			// You can also import them at the top level
 			// instead of a dynamic import
 			en: async () => {
-				return (await import('$lib/locales/en.json')).default;
+				return (await import('#lib/locales/en.json')).default;
 			},
 			nl: async () => {
-				return (await import('$lib/locales/nl.json')).default;
+				return (await import('#lib/locales/nl.json')).default;
 			}
 		}
 	});
@@ -145,7 +145,7 @@ export const createI18n = (i18n: () => I18nContext) => setContext(i18n());
 
 <script lang="ts">
 	import type { LayoutProps } from './$types.d.ts';
-	import { createI18n } from '$lib/i18n';
+	import { createI18n } from '#lib/i18n';
 
 	let { children, data }: LayoutProps = $props();
 	createI18n(() => data.i18n);
@@ -158,7 +158,7 @@ export const createI18n = (i18n: () => I18nContext) => setContext(i18n());
 
 ```svelte
 <script lang="ts">
-	import { useI18n } from '$lib/i18n';
+	import { useI18n } from '#lib/i18n';
 
 	let user = $state('John Doe');
 	let { t, getLocale } = useI18n();
