@@ -1,5 +1,11 @@
 # @svelte-i18n/core
 
+## 3.0.2
+
+### Patch Changes
+
+- cb5eacd: Use `esm-env` instead of `$app/environment` to detect the browser, so the package works with both SvelteKit 2 and SvelteKit 3.
+
 ## 3.0.1
 
 ### Patch Changes
