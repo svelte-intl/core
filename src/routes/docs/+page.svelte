@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { useI18n } from '$test/i18n.js';
+	import { useI18n } from '#test/i18n.js';
 
 	const { t } = useI18n();
 </script>

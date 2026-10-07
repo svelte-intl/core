@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createI18n } from '../lib/i18n.svelte.ts';
 
-vi.mock('$app/environment', () => ({ browser: true }));
+vi.mock('esm-env', () => ({ BROWSER: true }));
 
 vi.stubGlobal('document', {
 	cookie: '',

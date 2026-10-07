@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import type { LayoutProps } from './$types.d.ts';
-	import { createI18n } from '$test/i18n.js';
+	import { createI18n } from '#test/i18n.js';
 
 	import './layout.css';
 
