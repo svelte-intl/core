@@ -53,8 +53,8 @@ jobs:
         id: changesets
         uses: changesets/action@v1
         with:
-          # Use changeset publish so the Action knows what to release
-          publish: pnpm exec changeset publish
+          # npm publish (Trusted Publishing) + changeset tag, see scripts/publish.mjs
+          publish: node scripts/publish.mjs
           createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
