@@ -1,34 +1,73 @@
-import { browser } from '$app/environment';
-import type { MaybePromise, OptionalParams } from './types.js';
-import { getContext, setContext } from 'svelte';
+import { BROWSER as browser } from 'esm-env';
+import type {
+	DictionaryResolver,
+	ExtendDictionaries,
+	InferDict,
+	OptionalParams,
+	UnwrapResolver
+} from './types.js';
+import { getLocale } from './locale.ts';
 
-export type Dictionary =
-	| Record<string, string>
-	| (() => MaybePromise<Record<string, string>>);
-export type UnwrapDictionary<D extends Dictionary> =
-	D extends () => MaybePromise<infer R> ? R : D;
+type ExtensionLayers<Locales extends string> = Partial<
+	Record<Locales, DictionaryResolver<Record<string, string>>[]>
+>;
+
+const appendExtensions = <Locales extends string>(
+	current: ExtensionLayers<Locales> | undefined,
+	incoming: ExtendDictionaries<Locales>
+): ExtensionLayers<Locales> => {
+	const merged: ExtensionLayers<Locales> = { ...current };
+
+	for (const key of Object.keys(incoming) as Locales[]) {
+		const value = incoming[key];
+		if (value === undefined) continue;
+		merged[key] = [...(merged[key] ?? []), value];
+	}
+
+	return merged;
+};
+
+const resolveExtensions = async <Locales extends string>(
+	locale: Locales,
+	extensions?: ExtensionLayers<Locales>
+) => {
+	let merged: Record<string, string> = {};
+
+	for (const entry of extensions?.[locale] ?? []) {
+		const chunk = typeof entry === 'function' ? await entry() : entry;
+		merged = { ...merged, ...chunk };
+	}
+
+	return merged;
+};
 
 export type CreateI18nOptions<
 	Locales extends string,
-	Dictionaries extends Record<Locales, Dictionary>,
-	Locale extends Locales = Locales
+	Locale extends Locales = Locales,
+	Dicts extends Record<Locales, DictionaryResolver<Record<string, string>>> =
+		Record<Locales, DictionaryResolver<Record<string, string>>>,
+	Strict extends boolean = false
 > = {
 	locales: Locales[];
 	locale: Locale | (string & {});
-	dictionaries: Dictionaries;
+	dictionaries: Dicts;
 	fallbackLocale?: Locale;
+	/** Cookie name used when persisting the locale via `setLocale`. Defaults to `lang`. */
+	cookieName?: string;
+	/**
+	 * When `true`, `t` only accepts keys that exist in the dictionaries, so typos
+	 * are type errors. Keys added with `extend` are not known to the type system,
+	 * so include them in your dictionary type when using strict mode.
+	 * Defaults to `false`.
+	 */
+	strict?: Strict;
 };
 
 export type I18nInstance<
+	Dictionary extends Record<string, string> = Record<string, string>,
 	Locales extends string = string,
-	Dictionaries extends Record<Locales, Dictionary> = Record<
-		Locales,
-		Dictionary
-	>,
 	Locale extends Locales = Locales
-> = Awaited<
-	ReturnType<typeof createI18n<Locales, Dictionaries, Locale>>
->['i18n'];
+> = Awaited<ReturnType<typeof createI18n<Dictionary, Locales, Locale>>>;
 
 /**
  * Loads the dictionary for the specified locale.
@@ -41,46 +80,24 @@ export type I18nInstance<
  *
  * @returns The loaded dictionary for the specified locale
  */
-const loadDictionary = async <Locales extends string>(
+const loadDictionary = async <
+	Dictionary extends Record<string, string>,
+	Locales extends string
+>(
 	locale: Locales,
-	dictionaries: Record<Locales, Dictionary>
+	dictionaries: Record<Locales, DictionaryResolver<Dictionary>>,
+	dictionariesExtensions?: ExtensionLayers<Locales>
 ) => {
+	const extendedMessages = await resolveExtensions(
+		locale,
+		dictionariesExtensions
+	);
+
 	if (typeof dictionaries[locale] === 'function') {
-		return await dictionaries[locale]();
+		return { ...(await dictionaries[locale]()), ...extendedMessages };
 	}
 
-	return dictionaries[locale];
-};
-
-/**
- * Determines the appropriate locale to use based on the provided locale,
- * the list of supported locales, and an optional fallback locale.
- *
- * @param locale - The locale to check (e.g. "en-US")
- * @param supportedLocales - The list of supported locales (e.g. ["en", "nl"])
- * @param fallbackLocale - An optional fallback locale to use if the provided locale is not supported (e.g. "en")
- *
- * @returns The determined locale to use (e.g. "en")
- */
-const getLocale = (
-	locale: string,
-	supportedLocales: string[],
-	fallbackLocale?: string
-) => {
-	if (supportedLocales.includes(locale)) {
-		return locale;
-	}
-
-	const language = locale.split('-')[0];
-	if (supportedLocales.includes(language)) {
-		return language;
-	}
-
-	if (fallbackLocale) {
-		return fallbackLocale;
-	}
-
-	return supportedLocales[0];
+	return { ...dictionaries[locale], ...extendedMessages };
 };
 
 /**
@@ -94,84 +111,126 @@ const getLocale = (
  * @internal
  * @example
  * import { setContext } from 'svelte';
- * import { I18N_CONTEXT_KEY } from '$lib/i18n';
- * import { i18n } from '$lib/i18n';
+ * import { I18N_CONTEXT_KEY } from '#lib/i18n';
+ * import { i18n } from '#lib/i18n';
  *
  * setContext(I18N_CONTEXT_KEY, i18n);
  */
+/** Matches `{name}` placeholders. Mirrors `ExtractMessageParams` in types.d.ts. */
+const PLACEHOLDER = /\{([^{}]+)\}/g;
+
+/** Own-property check, so keys like `toString` never resolve to prototype members. */
+const hasOwn = (object: object, key: PropertyKey) =>
+	Object.prototype.hasOwnProperty.call(object, key);
+
 export const I18N_CONTEXT_KEY = Symbol('i18n');
 export const createI18n = async <
-	Locales extends string,
-	Dictionaries extends Record<Locales, Dictionary>,
-	Locale extends Locales = Locales
+	Dictionary extends Record<string, string> | InferDict = InferDict,
+	Locales extends string = string,
+	Locale extends Locales = Locales,
+	Dicts extends Record<Locales, DictionaryResolver<Record<string, string>>> =
+		Record<Locales, DictionaryResolver<Record<string, string>>>,
+	Strict extends boolean = false
 >(
-	options: CreateI18nOptions<Locales, Dictionaries, Locale>
+	options: CreateI18nOptions<Locales, Locale, Dicts, Strict>
 ) => {
-	console.log(options.locale);
+	type EffectiveDictionary = [Dictionary] extends [InferDict]
+		? UnwrapResolver<Dicts[Locales]> extends Record<string, string>
+			? UnwrapResolver<Dicts[Locales]>
+			: Record<string, string>
+		: Dictionary extends Record<string, string>
+			? Dictionary
+			: Record<string, string>;
 
-	let loading = $state(true);
+	/** In strict mode only known keys are accepted by `t`. */
+	type AllowedKey = [Strict] extends [true] ? never : string & {};
+
 	let locales = $state(options.locales);
-	let locale = $state.raw(
-		getLocale(
-			options.locale as Locales,
-			options.locales,
-			options.fallbackLocale
+	const initialLocale = getLocale(
+		options.locale as Locales,
+		options.locales,
+		options.fallbackLocale
+	);
+	let locale = $state.raw(initialLocale);
+
+	let dictionariesExtensions: ExtensionLayers<Locales> | undefined =
+		$state.raw();
+	let dictionaries = $state.raw(options.dictionaries);
+	const cookieName = options.cookieName ?? 'lang';
+
+	// The initial dictionary is loaded before createI18n resolves, so the
+	// instance starts in a settled state on both server and client.
+	let dictionary = $state.raw(
+		await loadDictionary(
+			initialLocale as Locales,
+			options.dictionaries,
+			undefined
 		)
 	);
-	let dictionaries = $state.raw(options.dictionaries);
-	let dictionary = $state.raw(
-		await loadDictionary(locale as Locales, options.dictionaries)
-	);
 
-	if (browser) {
-		loading = false;
-	}
-
-	$effect.root(() => {
-		$effect(() => {
-			loading = true;
-			if (!locales.includes(locale as Locales)) {
-				console.warn(
-					`Locale "${locale}" is not in the list of supported locales: ${locales.join(', ')}.`
-				);
-
-				locale = options.fallbackLocale ?? locales[0];
-			}
-
-			loadDictionary(locale as Locales, options.dictionaries)
-				.then((loadedDictionary) => {
-					dictionary = loadedDictionary;
-				})
-				.catch((error) => {
-					console.error(
-						`Failed to load dictionary for locale "${locale}":`,
-						error
-					);
-				})
-				.finally(() => {
-					loading = false;
-				});
+	/**
+	 * Locale switches and `extend` calls run one at a time, in call order.
+	 * Each task commits its result only after loading succeeded, so `locale`,
+	 * `dictionary`, the cookie and `<html lang>` never disagree.
+	 */
+	let pending = $state(0);
+	let queue: Promise<unknown> = Promise.resolve();
+	const enqueue = <T>(task: () => Promise<T>): Promise<T> => {
+		pending++;
+		const run = queue.then(task).finally(() => {
+			pending--;
 		});
-	});
+		queue = run.catch(() => {});
+		return run;
+	};
 
-	const t = <Key extends keyof UnwrapDictionary<Dictionaries[Locales]>>(
+	/** Incremented on every setLocale call, so superseded switches are skipped. */
+	let localeRequest = 0;
+
+	const persistLocale = (value: string) => {
+		const secure =
+			typeof location !== 'undefined' && location.protocol === 'https:'
+				? '; Secure'
+				: '';
+		document.cookie = `${encodeURIComponent(cookieName)}=${encodeURIComponent(value)}; path=/; max-age=31536000; SameSite=Lax${secure}`;
+		document.documentElement.lang = value;
+	};
+
+	const t = <Key extends keyof EffectiveDictionary | AllowedKey>(
 		key: Key,
-		...args: OptionalParams<UnwrapDictionary<Dictionaries[Locales]>[Key], Key>
-	) => {
-		// @ts-expect-error key mapping
-		let message: string | number = dictionary[key] || key;
-		let params = args[0] as Record<string, string | number> | undefined;
+		...args: Key extends keyof EffectiveDictionary
+			? OptionalParams<EffectiveDictionary[Key], Key>
+			: [params?: Record<string, string | number>]
+	): string => {
+		const value = hasOwn(dictionary, key)
+			? (dictionary as Record<string, unknown>)[key as string]
+			: undefined;
+		// A missing or empty translation falls back to the key itself.
+		const message =
+			typeof value === 'string' && value !== '' ? value : String(key);
+		const params = (args as unknown[])[0] as
+			| Record<string, string | number>
+			| undefined;
 
-		if (params) {
-			for (const [paramKey, paramValue] of Object.entries(params)) {
-				message = String(message).replace(`{${paramKey}}`, String(paramValue));
-			}
-		}
+		if (!params) return message;
 
-		return message as string;
+		// Single pass: every occurrence is replaced, values are inserted
+		// literally and never re-scanned for placeholders.
+		return message.replace(PLACEHOLDER, (match, name: string) =>
+			hasOwn(params, name) ? String(params[name]) : match
+		);
 	};
 
 	const i18n = {
+		/**
+		 * The currently active locale. This is a reactive prop,
+		 * so you can update it at runtime if needed (e.g. to allow the user to switch languages).
+		 *
+		 * @readonly
+		 */
+		get locale() {
+			return locale;
+		},
 		/**
 		 * The list of supported locales. This can be used to, for example, render a language switcher in your application.
 		 * This is a reactive prop, so you can update it at runtime if needed (e.g. to fetch additional locales from an API).
@@ -181,7 +240,7 @@ export const createI18n = async <
 		 *
 		 * @readonly
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 *
 		 * const { locales, setLocale } = useI18n();
 		 *
@@ -222,22 +281,64 @@ export const createI18n = async <
 		 * @readonly
 		 */
 		get loading() {
-			return { current: loading };
+			return { current: pending > 0 };
 		},
 		/**
-		 * Sets the currently active locale. This will cause all components that use the `t` function to re-render with the new locale.
+		 * Switches to another locale. The dictionary is loaded first; the locale, the
+		 * translations and (in the browser) the cookie and `document.documentElement.lang`
+		 * are only updated once loading succeeded.
 		 *
-		 * @param newLocale - The new locale to set. This should be one of the locales defined in the `locales` prop.
+		 * - An unsupported locale is ignored with a console warning.
+		 * - If loading fails, nothing changes and the returned promise rejects.
+		 * - When called several times in a row, the last call wins.
+		 *
+		 * @param newLocale - One of the locales passed to `createI18n`.
+		 * @returns A promise that resolves when the switch is done.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 *
 		 * const { setLocale } = useI18n();
 		 *
 		 * <button onclick={() => setLocale('en')}>Switch to English</button>
 		 * <button onclick={() => setLocale('nl')}>Switch to Dutch</button>
 		 */
-		setLocale(newLocale: Locales) {
-			locale = newLocale as Locale;
+		async setLocale(newLocale: Locales): Promise<void> {
+			if (!locales.includes(newLocale)) {
+				console.warn(
+					`[@svelte-i18n/core] Locale "${newLocale}" is not supported. Supported locales: ${locales.join(', ')}.`
+				);
+				return;
+			}
+
+			const request = ++localeRequest;
+
+			await enqueue(async () => {
+				// A newer setLocale call was made while this one was waiting.
+				if (request !== localeRequest) return;
+
+				let loaded: Record<string, string>;
+				try {
+					loaded = await loadDictionary(
+						newLocale,
+						options.dictionaries,
+						dictionariesExtensions
+					);
+				} catch (error) {
+					console.error(
+						`[@svelte-i18n/core] Failed to load dictionary for locale "${newLocale}":`,
+						error
+					);
+					throw error;
+				}
+
+				// Superseded while loading: don't flash an intermediate locale.
+				if (request !== localeRequest) return;
+
+				dictionary = loaded as typeof dictionary;
+				locale = newLocale;
+
+				if (browser) persistLocale(newLocale);
+			});
 		},
 		/**
 		 * Gets the currently active locale.
@@ -247,7 +348,7 @@ export const createI18n = async <
 		 *
 		 * @returns The currently active locale.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 *
 		 * const { getLocale } = useI18n();
 		 *
@@ -267,7 +368,7 @@ export const createI18n = async <
 		 *
 		 * @returns An array of supported locales.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 * const { getLocales } = useI18n();
 		 *
 		 * <p>Supported locales: {getLocales().join(', ')}</p>
@@ -281,7 +382,7 @@ export const createI18n = async <
 		 *
 		 * @returns A boolean indicating whether the i18n instance is currently loading the dictionary.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 * const { getLoading } = useI18n();
 		 *
 		 * {#if getLoading()}
@@ -291,7 +392,7 @@ export const createI18n = async <
 		 * {/if}
 		 */
 		getLoading() {
-			return loading;
+			return pending > 0;
 		},
 		/**
 		 * The translation function. This function takes a message key and an optional object of parameters,
@@ -301,7 +402,7 @@ export const createI18n = async <
 		 * @param params - An optional object of parameters to replace in the message. The keys in this object should correspond to the placeholders in the message string (e.g. `{name}`), and the values will be substituted into the message.
 		 * @returns The translated message with parameters substituted, or the key itself if no translation is found.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 *
 		 * const { t } = useI18n();
 		 *
@@ -310,15 +411,16 @@ export const createI18n = async <
 		 */
 		t,
 		/**
-		 * Gets the fallback locale defined in the i18n options. This is the locale that will
-		 * be used if the active locale is not supported or if a translation is missing.
+		 * Gets the fallback locale defined in the i18n options. It is used when the
+		 * requested locale is not supported. It is not used for missing keys:
+		 * `t` returns the key itself when a translation is missing.
 		 *
 		 * This can be useful for conditionally rendering content based on the fallback locale,
 		 * or for displaying the fallback language in a UI element.
 		 *
 		 * @returns The fallback locale defined in the i18n options, or undefined if no fallback locale is set.
 		 * @example
-		 * import { useI18n } from '$lib/i18n';
+		 * import { useI18n } from '#lib/i18n';
 		 * const { getFallbackLocale } = useI18n();
 		 *
 		 * <p>Fallback locale: {getFallbackLocale() ?? 'None'}</p>
@@ -331,40 +433,65 @@ export const createI18n = async <
 		 *
 		 * @see t
 		 */
-		_: t
+		_: t,
+		/**
+		 * Extends the existing dictionaries with additional messages for one or more locales.
+		 *
+		 * This is useful for cases where you want to add translations dynamically at runtime,
+		 * such as when loading additional messages from an API or when allowing users to contribute translations.
+		 *
+		 * The `dictionaries` parameter should be an object where the keys are locale identifiers (e.g. "en", "nl") and the values are either:
+		 * - An object containing the additional messages for that locale, or
+		 * - A function that returns a promise which resolves to the additional messages for that locale (e.g. an async function that fetches translations from an API).
+		 *
+		 * When you call this method, it will merge the provided additional messages with the existing dictionary for each specified locale.
+		 * If the same message key exists in both the existing dictionary and the additional messages, the value from the additional messages will take precedence.
+		 * Multiple calls to `extend` are accumulated; later values override earlier ones for the same key.
+		 * If loading the active locale's extension fails, the extension is not added and the promise rejects.
+		 *
+		 * @returns A promise that resolves to the i18n instance. Await each call; the promise itself has no `extend` method.
+		 * @example
+		 * import { useI18n } from '#lib/i18n';
+		 *
+		 * const { extend } = useI18n();
+		 *
+		 * // Extend the dictionaries with additional messages for English and Dutch
+		 * await extend({
+		 *   en: {
+		 *     welcome: "Welcome to our application!"
+		 *   },
+		 *   nl: async () => {
+		 *     const response = await fetch('/api/translations/nl');
+		 *     const data = await response.json();
+		 *     return data;
+		 *   }
+		 * });
+		 */
+		async extend<D extends ExtendDictionaries<Locales>>(dictionaries: D) {
+			await enqueue(async () => {
+				const layers = appendExtensions(dictionariesExtensions, dictionaries);
+				let loaded: Record<string, string>;
+				try {
+					loaded = await loadDictionary(
+						locale as Locales,
+						options.dictionaries,
+						layers
+					);
+				} catch (error) {
+					console.error(
+						`[@svelte-i18n/core] Failed to load extended dictionary for locale "${locale}":`,
+						error
+					);
+					throw error;
+				}
+
+				// Commit only after a successful load.
+				dictionariesExtensions = layers;
+				dictionary = loaded as typeof dictionary;
+			});
+			return i18n;
+		}
 	};
 
-	return {
-		i18n,
-		/**
-		 * A Svelte context hook that allows you to access the i18n instance from any component within the provider.
-		 * This is the primary way to use the i18n functionality in your components.
-		 *
-		 * Don't forget to wrap your component tree with the `I18nContext` provider to make the i18n instance available via this hook.
-		 *
-		 * @example
-		 * // my-component.svelte
-		 * import { useI18n } from '$lib/i18n';
-		 *
-		 * const { t, setLocale } = useI18n();
-		 */
-		useI18n: () => getContext<typeof i18n>(I18N_CONTEXT_KEY)
-	};
-};
-/**
- * Sets the i18n instance in Svelte's context, making it available to all child components via the `useI18n` hook.
- * This is typically used internally by the `I18nContext` provider component, but you can also use it directly if you need to set the context manually.
- *
- * @param data - A function that returns the i18n instance to set in the context. This allows for lazy initialization of the i18n instance, which can be useful if you need to load dictionaries asynchronously.
- * @example +layout.svelte
- * import { loadI18n } from '$lib/i18n';
- *
- * let { children, data }: LayoutProps = $props();
- *
- * loadI18n(() => data.i18n);
- */
-export const loadI18n = (
-	data: () => Awaited<ReturnType<typeof createI18n>>['i18n']
-) => {
-	return setContext(I18N_CONTEXT_KEY, data());
+	return i18n;
 };

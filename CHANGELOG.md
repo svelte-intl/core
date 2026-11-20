@@ -1,5 +1,47 @@
 # @svelte-i18n/core
 
+## 3.0.2
+
+### Patch Changes
+
+- cb5eacd: Use `esm-env` instead of `$app/environment` to detect the browser, so the package works with both SvelteKit 2 and SvelteKit 3.
+
+## 3.0.1
+
+### Patch Changes
+
+- c221add: remove empty changeset
+
+## 3.0.0
+
+### Major Changes
+
+- 2d42957: feat; new extend functionality to use fine grained translations
+
+### Minor Changes
+
+- ed8f36d: feat [#12]; save locale in cookie and update HTML lang attr on locale change
+
+## 2.0.1
+
+### Patch Changes
+
+- c37b420: Add thumbnail
+- 1dd1b58: Update README.md
+- 550bfd6: Update readme.md
+- 9849b4f: Update README.md
+- 434f9c2: Update README.md
+
+## 2.0.0
+
+### Major Changes
+
+- 84a3484: simplify setup and better SSR integration
+
+### Patch Changes
+
+- 2e3a8f2: Remove console.log
+
 ## 1.3.0
 
 ### Minor Changes

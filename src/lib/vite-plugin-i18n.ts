@@ -1,0 +1,351 @@
+import type { Plugin } from 'vite';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+
+/** Minimal ESTree shapes used by the analysis (Rollup and Rolldown both produce ESTree). */
+type Node = { type: string; [key: string]: unknown };
+type Literal = Node & { type: 'Literal'; value: unknown };
+type Identifier = Node & { type: 'Identifier'; name: string };
+type Property = Node & { type: 'Property'; key: Node; value: Node };
+type ObjectExpression = Node & { type: 'ObjectExpression'; properties: Node[] };
+type CallExpression = Node & {
+	type: 'CallExpression';
+	callee: Node;
+	arguments: Node[];
+};
+type MemberExpression = Node & { type: 'MemberExpression'; property: Node };
+type ImportExpression = Node & { type: 'ImportExpression'; source: Node };
+
+export type I18nPluginOptions = {
+	/**
+	 * Where the generated type is written, relative to the Vite root.
+	 * @default 'src/lib/i18n-types.d.ts'
+	 */
+	output?: string;
+	/**
+	 * Fetch `fetch('https://…')` URLs found in dictionary loaders to collect their keys.
+	 * Relative URLs (`fetch('/api/…')`) are fetched from the dev server, in dev only.
+	 * @default true
+	 */
+	fetch?: boolean;
+};
+
+type Sources = { imports: string[]; urls: string[] };
+
+const LOG_PREFIX = '[@svelte-i18n/core]';
+const SCRIPT_RE = /\.(?:[cm]?[jt]s)$/;
+const FETCH_TIMEOUT_MS = 5000;
+
+const isNode = (value: unknown): value is Node =>
+	typeof value === 'object' &&
+	value !== null &&
+	typeof (value as Node).type === 'string';
+
+/** Walks an ESTree tree and calls `visit` for every node. */
+function walk(node: Node, visit: (node: Node) => void) {
+	visit(node);
+	for (const value of Object.values(node)) {
+		if (Array.isArray(value)) {
+			for (const child of value) if (isNode(child)) walk(child, visit);
+		} else if (isNode(value)) {
+			walk(value, visit);
+		}
+	}
+}
+
+const stringLiteral = (node: Node | undefined): string | undefined =>
+	node?.type === 'Literal' && typeof (node as Literal).value === 'string'
+		? ((node as Literal).value as string)
+		: node?.type === 'TemplateLiteral' &&
+			  (node.expressions as Node[]).length === 0 &&
+			  (node.quasis as Node[]).length === 1
+			? ((node.quasis as Node[])[0].value as { cooked: string }).cooked
+			: undefined;
+
+/** Collects static `import('…')` paths and `fetch('…')` URLs inside an object of locale loaders. */
+function collectSources(object: ObjectExpression, into: Sources) {
+	for (const property of object.properties) {
+		if (property.type !== 'Property') continue;
+		walk((property as Property).value, (node) => {
+			if (node.type === 'ImportExpression') {
+				const path = stringLiteral((node as ImportExpression).source);
+				if (path) into.imports.push(path);
+			} else if (node.type === 'CallExpression') {
+				const call = node as CallExpression;
+				const url = stringLiteral(call.arguments[0]);
+				if (
+					url &&
+					call.callee.type === 'Identifier' &&
+					(call.callee as Identifier).name === 'fetch'
+				) {
+					into.urls.push(url);
+				}
+			}
+		});
+	}
+}
+
+/** Finds dictionary sources in `createI18n({ dictionaries: {…} })` and `x.extend({…})` calls. */
+export function findSources(program: Node): Sources {
+	const sources: Sources = { imports: [], urls: [] };
+
+	walk(program, (node) => {
+		if (node.type !== 'CallExpression') return;
+		const call = node as CallExpression;
+		const arg = call.arguments[0];
+		if (arg?.type !== 'ObjectExpression') return;
+
+		const callee = call.callee;
+		const isExtend =
+			callee.type === 'MemberExpression' &&
+			(callee as MemberExpression).property.type === 'Identifier' &&
+			((callee as MemberExpression).property as Identifier).name === 'extend';
+		const isCreate =
+			callee.type === 'Identifier' &&
+			(callee as Identifier).name === 'createI18n';
+
+		if (isExtend) {
+			collectSources(arg as ObjectExpression, sources);
+		} else if (isCreate) {
+			const dictionaries = (arg as ObjectExpression).properties.find(
+				(p): p is Property =>
+					p.type === 'Property' &&
+					(((p as Property).key.type === 'Identifier' &&
+						((p as Property).key as Identifier).name === 'dictionaries') ||
+						stringLiteral((p as Property).key) === 'dictionaries')
+			);
+			if (dictionaries?.value.type === 'ObjectExpression') {
+				collectSources(dictionaries.value as ObjectExpression, sources);
+			}
+		}
+	});
+
+	return sources;
+}
+
+/** True for a flat `Record<string, string>`, the shape of a dictionary. */
+export function isDictionary(value: unknown): value is Record<string, string> {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		!Array.isArray(value) &&
+		Object.values(value).every((v) => typeof v === 'string')
+	);
+}
+
+/** Renders the generated declaration file. Keys are sorted so the output is stable. */
+export function renderTypes(keys: Iterable<string>): string {
+	const lines = [...new Set(keys)]
+		.sort()
+		.map((key) => `\t${JSON.stringify(key)}: string;`);
+
+	return [
+		'// Generated by @svelte-i18n/core/vite. Do not edit.',
+		'export type I18nDictionary = {',
+		...lines,
+		'};',
+		''
+	].join('\n');
+}
+
+/**
+ * Generates an `I18nDictionary` type with every key found in your dictionaries,
+ * including dictionaries loaded with `fetch` or added with `extend`.
+ *
+ * @example
+ * // vite.config.ts
+ * import { sveltekit } from '@sveltejs/kit/vite';
+ * import { i18n } from '@svelte-i18n/core/vite';
+ *
+ * export default defineConfig({ plugins: [sveltekit(), i18n()] });
+ */
+export function i18n(options: I18nPluginOptions = {}): Plugin {
+	const fetchEnabled = options.fetch ?? true;
+	let root = process.cwd();
+	let output = '';
+	let isDev = false;
+	let devOrigin: string | undefined;
+
+	/**
+	 * Dictionary sources per module id, recomputed whenever a module is transformed.
+	 * JSON files are re-read on every write, so edits show up without a re-transform.
+	 */
+	const byModule = new Map<string, { files: string[]; fetched: Set<string> }>();
+	/** Bumped per module so slow fetches can't overwrite newer results. */
+	const generation = new Map<string, number>();
+	let lastWritten: string | undefined;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+
+	const write = () => {
+		clearTimeout(timer);
+		timer = undefined;
+		const allKeys = [...byModule.values()].flatMap(({ files, fetched }) => [
+			...files.flatMap(readKeys),
+			...fetched
+		]);
+		const content = renderTypes(allKeys);
+		if (content === lastWritten) return;
+
+		let existing: string | undefined;
+		try {
+			existing = readFileSync(output, 'utf-8');
+		} catch {
+			// does not exist yet
+		}
+
+		lastWritten = content;
+		if (existing === content) return;
+
+		mkdirSync(dirname(output), { recursive: true });
+		writeFileSync(output, content);
+		console.info(
+			`${LOG_PREFIX} Wrote ${new Set(allKeys).size} keys to ${relative(root, output)}`
+		);
+	};
+
+	const readKeys = (file: string): string[] => {
+		try {
+			const json: unknown = JSON.parse(readFileSync(file, 'utf-8'));
+			return isDictionary(json) ? Object.keys(json) : [];
+		} catch {
+			return [];
+		}
+	};
+
+	const schedule = () => {
+		clearTimeout(timer);
+		timer = setTimeout(write, 100);
+	};
+
+	const fetchDictionary = async (
+		url: string
+	): Promise<Record<string, string> | undefined> => {
+		const absolute = /^https?:\/\//.test(url);
+		if (!absolute && !devOrigin) return undefined;
+		const input = absolute ? url : new URL(url, devOrigin).href;
+
+		try {
+			const response = await fetch(input, {
+				signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+			});
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			const json: unknown = await response.json();
+			if (isDictionary(json)) return json;
+			console.warn(
+				`${LOG_PREFIX} ${input} did not return a flat object of strings, skipped.`
+			);
+		} catch (error) {
+			console.warn(
+				`${LOG_PREFIX} Could not fetch ${input}: ${error instanceof Error ? error.message : error}`
+			);
+		}
+		return undefined;
+	};
+
+	return {
+		name: 'svelte-i18n:types',
+
+		config() {
+			// Writing the generated file must not trigger a reload.
+			const name = basename(options.output ?? 'i18n-types.d.ts');
+			return { server: { watch: { ignored: [`**/${name}`] } } };
+		},
+
+		configResolved(config) {
+			root = config.root;
+			const target = options.output ?? 'src/lib/i18n-types.d.ts';
+			output = isAbsolute(target) ? target : resolve(root, target);
+			isDev = config.command === 'serve';
+		},
+
+		configureServer(server) {
+			server.httpServer?.once('listening', () => {
+				const address = server.httpServer?.address();
+				if (address && typeof address === 'object') {
+					const https = Boolean(server.config.server.https);
+					devOrigin = `${https ? 'https' : 'http'}://localhost:${address.port}`;
+				}
+			});
+		},
+
+		async transform(code, id) {
+			const file = id.split('?')[0];
+			if (!SCRIPT_RE.test(file) || file.includes('/node_modules/')) return null;
+			if (!code.includes('createI18n(') && !code.includes('.extend('))
+				return null;
+
+			let sources: Sources;
+			try {
+				sources = findSources(this.parse(code) as unknown as Node);
+			} catch {
+				return null;
+			}
+
+			if (!sources.imports.length && !sources.urls.length) {
+				if (byModule.delete(file)) schedule();
+				return null;
+			}
+
+			const run = (generation.get(file) ?? 0) + 1;
+			generation.set(file, run);
+			const files: string[] = [];
+			const fetched = new Set<string>();
+
+			for (const path of sources.imports) {
+				const resolved = await this.resolve(path, id);
+				const absolute =
+					resolved?.id.split('?')[0] ?? resolve(dirname(file), path);
+				if (!absolute.endsWith('.json')) continue;
+				try {
+					const json: unknown = JSON.parse(readFileSync(absolute, 'utf-8'));
+					if (!isDictionary(json)) {
+						console.warn(
+							`${LOG_PREFIX} ${relative(root, absolute)} is not a flat object of strings, skipped.`
+						);
+					}
+				} catch (error) {
+					console.warn(
+						`${LOG_PREFIX} Could not read ${relative(root, absolute)}: ${error instanceof Error ? error.message : error}`
+					);
+				}
+				files.push(absolute);
+				this.addWatchFile(absolute);
+			}
+
+			byModule.set(file, { files, fetched });
+			schedule();
+
+			if (fetchEnabled && sources.urls.length) {
+				const pendingFetch = Promise.all(sources.urls.map(fetchDictionary)).then(
+					(dictionaries) => {
+						if (generation.get(file) !== run) return;
+						for (const dictionary of dictionaries) {
+							if (dictionary)
+								Object.keys(dictionary).forEach((k) => fetched.add(k));
+						}
+						schedule();
+					}
+				);
+				// In dev, never block the transform on the network.
+				// In a build, wait so the types are complete when the build ends.
+				if (!isDev) await pendingFetch;
+			}
+
+			return null;
+		},
+
+		watchChange(id) {
+			const file = id.split('?')[0];
+			for (const { files } of byModule.values()) {
+				if (files.includes(file)) return schedule();
+			}
+		},
+
+		buildEnd() {
+			if (!isDev) write();
+		}
+	};
+}
+
+/** @deprecated Use `i18n` from `@svelte-i18n/core/vite`. */
+export const i18nPlugin = i18n;
