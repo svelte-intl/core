@@ -1,12 +1,21 @@
-<img src="./static/logo-dark.png" alt="svelte-i18n logo">
+<img src="https://raw.githubusercontent.com/svelte-intl/core/main/static/logo-dark.png" alt="svelte-i18n logo">
+
+# @svelte-i18n/core
+
+Tiny, type-safe i18n for **Svelte 5** and **SvelteKit**. Runes instead of stores, flat JSON dictionaries, autocompleted translation keys, SSR-safe.
+
+📖 **Documentation: [svelte-i18n.com](https://svelte-i18n.com)**
+
+> Not to be confused with the older, store-based [`svelte-i18n`](https://github.com/kaisermann/svelte-i18n) package. This library has no `$_` store: you call `t()` from `useI18n()`.
 
 ### Why another i18n library?
 
 - **Svelte 5** ✅
 - **Runes and not stores** ✅
+- **Type-safe keys and parameters** ✅
 - **Easy to use** ✅
 - **SSR ready** ✅
-- **No external dependencies** ✅
+- **Tiny**, with a single 1 kB dependency ([`esm-env`](https://github.com/benmccann/esm-env)) ✅
 
 ---
 
@@ -91,16 +100,15 @@ Set the HTML `lang` attribute for SSR:
 
 ```ts
 // src/hooks.server.ts
-import type { Handle } from '@sveltejs/kit';
+import { createI18nHandle } from '@svelte-i18n/core/server';
 
-export const handle: Handle = async ({ event, resolve }) => {
-	const locale = event.cookies.get('lang');
-
-	return resolve(event, {
-		transformPageChunk: ({ html }) => html.replace('%lang%', locale ?? 'en')
-	});
-};
+export const handle = createI18nHandle({
+	locales: ['en', 'nl'],
+	fallbackLocale: 'en'
+});
 ```
+
+The handle reads the `lang` cookie (change it with `cookieName`) and replaces `%lang%` with a supported locale. To combine it with your own hooks, use `sequence(createI18nHandle({ ... }), yourHandle)` from SvelteKit.
 
 On the client, `setLocale` also updates `document.documentElement.lang` when the user switches language.
 

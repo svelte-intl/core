@@ -2,7 +2,7 @@ import adapter from '@sveltejs/adapter-auto';
 import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
-import { i18nPlugin } from './src/lib/vite-plugin-i18n.js';
+import { i18n } from './src/lib/vite-plugin-i18n.js';
 
 export default defineConfig({
 	plugins: [
@@ -19,6 +19,7 @@ export default defineConfig({
 			// See https://svelte.dev/docs/kit/adapters for more information about adapters.
 			adapter: adapter()
 		}),
-		i18nPlugin()
+		// Keep generated types out of src/lib, which is published.
+		i18n({ output: 'i18n-types.d.ts' })
 	]
 });

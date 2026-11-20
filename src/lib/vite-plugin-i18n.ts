@@ -1,341 +1,351 @@
-import type { Plugin, ViteDevServer } from 'vite';
-import { parseAst } from 'rollup/parseAst';
-import { execFile } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import type {
-	CallExpression,
-	Identifier,
-	ImportExpression,
-	MemberExpression,
-	ObjectExpression,
-	Property,
-	ArrowFunctionExpression,
-	FunctionExpression,
-	Literal
-} from 'estree';
+import type { Plugin } from 'vite';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 
-/** Stable path for the merged dictionary written before each CLI run. */
-const MERGED_TMP = join(tmpdir(), 'i18n-merged.json');
+/** Minimal ESTree shapes used by the analysis (Rollup and Rolldown both produce ESTree). */
+type Node = { type: string; [key: string]: unknown };
+type Literal = Node & { type: 'Literal'; value: unknown };
+type Identifier = Node & { type: 'Identifier'; name: string };
+type Property = Node & { type: 'Property'; key: Node; value: Node };
+type ObjectExpression = Node & { type: 'ObjectExpression'; properties: Node[] };
+type CallExpression = Node & {
+	type: 'CallExpression';
+	callee: Node;
+	arguments: Node[];
+};
+type MemberExpression = Node & { type: 'MemberExpression'; property: Node };
+type ImportExpression = Node & { type: 'ImportExpression'; source: Node };
 
-/**
- * Walks an ESTree AST and calls `visitor` for every node.
- */
-function walk(node: object, visitor: (node: object) => void) {
-	visitor(node);
+export type I18nPluginOptions = {
+	/**
+	 * Where the generated type is written, relative to the Vite root.
+	 * @default 'src/lib/i18n-types.d.ts'
+	 */
+	output?: string;
+	/**
+	 * Fetch `fetch('https://…')` URLs found in dictionary loaders to collect their keys.
+	 * Relative URLs (`fetch('/api/…')`) are fetched from the dev server, in dev only.
+	 * @default true
+	 */
+	fetch?: boolean;
+};
+
+type Sources = { imports: string[]; urls: string[] };
+
+const LOG_PREFIX = '[@svelte-i18n/core]';
+const SCRIPT_RE = /\.(?:[cm]?[jt]s)$/;
+const FETCH_TIMEOUT_MS = 5000;
+
+const isNode = (value: unknown): value is Node =>
+	typeof value === 'object' &&
+	value !== null &&
+	typeof (value as Node).type === 'string';
+
+/** Walks an ESTree tree and calls `visit` for every node. */
+function walk(node: Node, visit: (node: Node) => void) {
+	visit(node);
 	for (const value of Object.values(node)) {
-		if (value && typeof value === 'object') {
-			if (Array.isArray(value)) {
-				for (const child of value) {
-					if (child && typeof child === 'object') walk(child, visitor);
-				}
-			} else if ('type' in value) {
-				walk(value, visitor);
-			}
+		if (Array.isArray(value)) {
+			for (const child of value) if (isNode(child)) walk(child, visit);
+		} else if (isNode(value)) {
+			walk(value, visit);
 		}
 	}
 }
 
-/** Shape returned by both extractor functions. */
-type ExtractedSources = {
-	/** Locale key → list of fetch() URL strings */
-	fetchUrls: Record<string, string[]>;
-	/** Locale key → list of import() path strings */
-	importPaths: Record<string, string[]>;
-};
+const stringLiteral = (node: Node | undefined): string | undefined =>
+	node?.type === 'Literal' && typeof (node as Literal).value === 'string'
+		? ((node as Literal).value as string)
+		: node?.type === 'TemplateLiteral' &&
+			  (node.expressions as Node[]).length === 0 &&
+			  (node.quasis as Node[]).length === 1
+			? ((node.quasis as Node[])[0].value as { cooked: string }).cooked
+			: undefined;
 
-/**
- * Given the ObjectExpression passed to `.extend({...})`, extract every
- * static string passed to `fetch(url)` or `import(path)` inside each locale function.
- */
-function extractSources(obj: ObjectExpression): ExtractedSources {
-	const fetchUrls: Record<string, string[]> = {};
-	const importPaths: Record<string, string[]> = {};
-
-	for (const prop of obj.properties) {
-		if (prop.type !== 'Property') continue;
-		const property = prop as Property;
-
-		const key =
-			property.key.type === 'Identifier'
-				? property.key.name
-				: property.key.type === 'Literal'
-					? String((property.key as Literal).value)
-					: null;
-		if (!key) continue;
-
-		const fn = property.value as ArrowFunctionExpression | FunctionExpression;
-		if (
-			fn.type !== 'ArrowFunctionExpression' &&
-			fn.type !== 'FunctionExpression'
-		)
-			continue;
-
-		walk(fn, (node) => {
-			if (!('type' in node)) return;
-
-			// fetch('...')
-			if (node.type === 'CallExpression') {
-				const call = node as unknown as CallExpression;
-				const arg = call.arguments[0];
-				if (
-					call.callee.type === 'Identifier' &&
-					call.callee.name === 'fetch' &&
-					arg?.type === 'Literal' &&
-					typeof (arg as Literal).value === 'string'
-				) {
-					(fetchUrls[key] ??= []).push((arg as Literal).value as string);
-				}
-			}
-
-			// import('...')
+/** Collects static `import('…')` paths and `fetch('…')` URLs inside an object of locale loaders. */
+function collectSources(object: ObjectExpression, into: Sources) {
+	for (const property of object.properties) {
+		if (property.type !== 'Property') continue;
+		walk((property as Property).value, (node) => {
 			if (node.type === 'ImportExpression') {
-				const imp = node as unknown as ImportExpression;
+				const path = stringLiteral((node as ImportExpression).source);
+				if (path) into.imports.push(path);
+			} else if (node.type === 'CallExpression') {
+				const call = node as CallExpression;
+				const url = stringLiteral(call.arguments[0]);
 				if (
-					imp.source.type === 'Literal' &&
-					typeof (imp.source as Literal).value === 'string'
+					url &&
+					call.callee.type === 'Identifier' &&
+					(call.callee as Identifier).name === 'fetch'
 				) {
-					(importPaths[key] ??= []).push(
-						(imp.source as Literal).value as string
-					);
+					into.urls.push(url);
 				}
 			}
 		});
 	}
-
-	return { fetchUrls, importPaths };
 }
 
-/**
- * Returns true if the value is a flat Record<string, string> —
- * the shape expected for a locale dictionary.
- */
-function isLocaleDictionary(value: unknown): value is Record<string, string> {
+/** Finds dictionary sources in `createI18n({ dictionaries: {…} })` and `x.extend({…})` calls. */
+export function findSources(program: Node): Sources {
+	const sources: Sources = { imports: [], urls: [] };
+
+	walk(program, (node) => {
+		if (node.type !== 'CallExpression') return;
+		const call = node as CallExpression;
+		const arg = call.arguments[0];
+		if (arg?.type !== 'ObjectExpression') return;
+
+		const callee = call.callee;
+		const isExtend =
+			callee.type === 'MemberExpression' &&
+			(callee as MemberExpression).property.type === 'Identifier' &&
+			((callee as MemberExpression).property as Identifier).name === 'extend';
+		const isCreate =
+			callee.type === 'Identifier' &&
+			(callee as Identifier).name === 'createI18n';
+
+		if (isExtend) {
+			collectSources(arg as ObjectExpression, sources);
+		} else if (isCreate) {
+			const dictionaries = (arg as ObjectExpression).properties.find(
+				(p): p is Property =>
+					p.type === 'Property' &&
+					(((p as Property).key.type === 'Identifier' &&
+						((p as Property).key as Identifier).name === 'dictionaries') ||
+						stringLiteral((p as Property).key) === 'dictionaries')
+			);
+			if (dictionaries?.value.type === 'ObjectExpression') {
+				collectSources(dictionaries.value as ObjectExpression, sources);
+			}
+		}
+	});
+
+	return sources;
+}
+
+/** True for a flat `Record<string, string>`, the shape of a dictionary. */
+export function isDictionary(value: unknown): value is Record<string, string> {
 	return (
 		typeof value === 'object' &&
 		value !== null &&
 		!Array.isArray(value) &&
-		Object.values(value as object).every((v) => typeof v === 'string')
+		Object.values(value).every((v) => typeof v === 'string')
 	);
 }
 
-/**
- * Applies the result of extractSources — reading import() paths from disk and
- * queuing fetch() URLs against the dev server.
- * Shared by both the .extend() and createI18n() handlers.
- *
- * `resolveId` is `this.resolve` from the transform hook — it honours Vite aliases.
- */
-async function processSources(
-	{ fetchUrls, importPaths }: ExtractedSources,
-	id: string,
-	fetchPromises: Promise<void>[],
-	devServer: ViteDevServer | null,
-	mergeAndSchedule: (dict: Record<string, string>) => void,
-	isLocaleDictionary: (v: unknown) => v is Record<string, string>,
-	resolveId: (id: string, importer: string) => Promise<{ id: string } | null>
-) {
-	for (const paths of Object.values(importPaths)) {
-		for (const p of paths) {
-			try {
-				// Use Vite's resolver so aliases like #test/* are expanded correctly.
-				const resolved = await resolveId(p, id);
-				const absPath = resolved?.id ?? resolve(dirname(id), p);
-				const json = JSON.parse(readFileSync(absPath, 'utf-8'));
-				if (isLocaleDictionary(json)) mergeAndSchedule(json);
-			} catch (err: unknown) {
-				const msg = err instanceof Error ? err.message : String(err);
-				console.warn(`[i18n] could not read import path ${p}:`, msg);
-			}
-		}
-	}
+/** Renders the generated declaration file. Keys are sorted so the output is stable. */
+export function renderTypes(keys: Iterable<string>): string {
+	const lines = [...new Set(keys)]
+		.sort()
+		.map((key) => `\t${JSON.stringify(key)}: string;`);
 
-	if (!devServer || !Object.keys(fetchUrls).length) return;
-
-	const address = devServer.httpServer?.address();
-	const port = typeof address === 'object' && address ? address.port : 5173;
-
-	for (const urls of Object.values(fetchUrls)) {
-		for (const url of urls) {
-			const input = /^https?:\/\//.test(url)
-				? url
-				: `http://localhost:${port}${url}`;
-
-			fetchPromises.push(
-				fetch(input)
-					.then((r) => r.json())
-					.then((json) => {
-						if (isLocaleDictionary(json)) mergeAndSchedule(json);
-					})
-					.catch((err: unknown) => {
-						const msg = err instanceof Error ? err.message : String(err);
-						console.warn(`[i18n] could not fetch ${input}:`, msg);
-					})
-			);
-		}
-	}
+	return [
+		'// Generated by @svelte-i18n/core/vite. Do not edit.',
+		'export type I18nDictionary = {',
+		...lines,
+		'};',
+		''
+	].join('\n');
 }
 
-export function i18nPlugin(): Plugin {
-	let devServer: ViteDevServer | null = null;
+/**
+ * Generates an `I18nDictionary` type with every key found in your dictionaries,
+ * including dictionaries loaded with `fetch` or added with `extend`.
+ *
+ * @example
+ * // vite.config.ts
+ * import { sveltekit } from '@sveltejs/kit/vite';
+ * import { i18n } from '@svelte-i18n/core/vite';
+ *
+ * export default defineConfig({ plugins: [sveltekit(), i18n()] });
+ */
+export function i18n(options: I18nPluginOptions = {}): Plugin {
+	const fetchEnabled = options.fetch ?? true;
+	let root = process.cwd();
+	let output = '';
+	let isDev = false;
+	let devOrigin: string | undefined;
 
-	/** Accumulated union of all locale keys seen so far. */
-	const mergedDict: Record<string, string> = {};
+	/**
+	 * Dictionary sources per module id, recomputed whenever a module is transformed.
+	 * JSON files are re-read on every write, so edits show up without a re-transform.
+	 */
+	const byModule = new Map<string, { files: string[]; fetched: Set<string> }>();
+	/** Bumped per module so slow fetches can't overwrite newer results. */
+	const generation = new Map<string, number>();
+	let lastWritten: string | undefined;
+	let timer: ReturnType<typeof setTimeout> | undefined;
 
-	/** Debounce handle — we only run the CLI once after all locales settle. */
-	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+	const write = () => {
+		clearTimeout(timer);
+		timer = undefined;
+		const allKeys = [...byModule.values()].flatMap(({ files, fetched }) => [
+			...files.flatMap(readKeys),
+			...fetched
+		]);
+		const content = renderTypes(allKeys);
+		if (content === lastWritten) return;
 
-	function mergeAndSchedule(dict: Record<string, string>) {
-		Object.assign(mergedDict, dict);
+		let existing: string | undefined;
+		try {
+			existing = readFileSync(output, 'utf-8');
+		} catch {
+			// does not exist yet
+		}
 
-		if (debounceTimer) clearTimeout(debounceTimer);
-		debounceTimer = setTimeout(() => {
-			writeFileSync(MERGED_TMP, JSON.stringify(mergedDict, null, '\t'));
-			execFile(
-				'npx',
-				['@svelte-i18n/cli', 'generate-types', '--input', MERGED_TMP],
-				(err, _stdout, stderr) => {
-					if (err) {
-						console.error('[i18n] generate-types failed:', stderr);
-					} else {
-						console.log(
-							`[i18n] generated merged types (${Object.keys(mergedDict).length} keys)`
-						);
-					}
-				}
+		lastWritten = content;
+		if (existing === content) return;
+
+		mkdirSync(dirname(output), { recursive: true });
+		writeFileSync(output, content);
+		console.info(
+			`${LOG_PREFIX} Wrote ${new Set(allKeys).size} keys to ${relative(root, output)}`
+		);
+	};
+
+	const readKeys = (file: string): string[] => {
+		try {
+			const json: unknown = JSON.parse(readFileSync(file, 'utf-8'));
+			return isDictionary(json) ? Object.keys(json) : [];
+		} catch {
+			return [];
+		}
+	};
+
+	const schedule = () => {
+		clearTimeout(timer);
+		timer = setTimeout(write, 100);
+	};
+
+	const fetchDictionary = async (
+		url: string
+	): Promise<Record<string, string> | undefined> => {
+		const absolute = /^https?:\/\//.test(url);
+		if (!absolute && !devOrigin) return undefined;
+		const input = absolute ? url : new URL(url, devOrigin).href;
+
+		try {
+			const response = await fetch(input, {
+				signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+			});
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			const json: unknown = await response.json();
+			if (isDictionary(json)) return json;
+			console.warn(
+				`${LOG_PREFIX} ${input} did not return a flat object of strings, skipped.`
 			);
-		}, 200);
-	}
+		} catch (error) {
+			console.warn(
+				`${LOG_PREFIX} Could not fetch ${input}: ${error instanceof Error ? error.message : error}`
+			);
+		}
+		return undefined;
+	};
 
 	return {
-		name: 'vite-plugin-i18n',
+		name: 'svelte-i18n:types',
 
-		// Exclude the generated types file from Vite's file watcher so writing
-		// it doesn't trigger an HMR reload.
 		config() {
-			return {
-				server: { watch: { ignored: ['**/i18n-types.d.ts'] } }
-			};
+			// Writing the generated file must not trigger a reload.
+			const name = basename(options.output ?? 'i18n-types.d.ts');
+			return { server: { watch: { ignored: [`**/${name}`] } } };
+		},
+
+		configResolved(config) {
+			root = config.root;
+			const target = options.output ?? 'src/lib/i18n-types.d.ts';
+			output = isAbsolute(target) ? target : resolve(root, target);
+			isDev = config.command === 'serve';
 		},
 
 		configureServer(server) {
-			devServer = server;
-
-			server.middlewares.use((req, res, next) => {
-				const chunks: Buffer[] = [];
-
-				const originalWrite = res.write.bind(res);
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				(res as any).write = (chunk: any, ...args: any[]) => {
-					if (chunk)
-						chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-					return originalWrite(chunk, ...args);
-				};
-
-				const originalEnd = res.end.bind(res);
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				(res as any).end = (chunk?: any, ...args: any[]) => {
-					if (chunk)
-						chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-
-					const contentType = res.getHeader('content-type');
-					if (
-						typeof contentType === 'string' &&
-						contentType.includes('application/json')
-					) {
-						try {
-							const body = Buffer.concat(chunks).toString('utf-8');
-							const json = JSON.parse(body);
-							if (isLocaleDictionary(json)) mergeAndSchedule(json);
-						} catch {
-							// not valid JSON or wrong shape — ignore
-						}
-					}
-
-					return originalEnd(chunk, ...args);
-				};
-
-				next();
+			server.httpServer?.once('listening', () => {
+				const address = server.httpServer?.address();
+				if (address && typeof address === 'object') {
+					const https = Boolean(server.config.server.https);
+					devOrigin = `${https ? 'https' : 'http'}://localhost:${address.port}`;
+				}
 			});
 		},
 
 		async transform(code, id) {
-			if (!/\.[jt]s$/.test(id)) return null;
-			if (!code.includes('.extend(') && !code.includes('createI18n('))
+			const file = id.split('?')[0];
+			if (!SCRIPT_RE.test(file) || file.includes('/node_modules/')) return null;
+			if (!code.includes('createI18n(') && !code.includes('.extend('))
 				return null;
 
-			const ast = parseAst(code);
-			const fetchPromises: Promise<void>[] = [];
-			const sourcePromises: Promise<void>[] = [];
-			const resolveId = this.resolve.bind(this);
+			let sources: Sources;
+			try {
+				sources = findSources(this.parse(code) as unknown as Node);
+			} catch {
+				return null;
+			}
 
-			walk(ast, (node: object) => {
-				if (!('type' in node) || node.type !== 'CallExpression') return;
+			if (!sources.imports.length && !sources.urls.length) {
+				if (byModule.delete(file)) schedule();
+				return null;
+			}
 
-				const call = node as unknown as CallExpression;
+			const run = (generation.get(file) ?? 0) + 1;
+			generation.set(file, run);
+			const files: string[] = [];
+			const fetched = new Set<string>();
 
-				// --- .extend({ en: ..., nl: ... }) ---
-				if (
-					call.callee.type === 'MemberExpression' &&
-					(call.callee as MemberExpression).property.type === 'Identifier' &&
-					((call.callee as MemberExpression).property as Identifier).name ===
-						'extend'
-				) {
-					const arg = call.arguments[0];
-					if (arg?.type === 'ObjectExpression') {
-						sourcePromises.push(
-							processSources(
-								extractSources(arg as unknown as ObjectExpression),
-								id,
-								fetchPromises,
-								devServer,
-								mergeAndSchedule,
-								isLocaleDictionary,
-								resolveId
-							)
+			for (const path of sources.imports) {
+				const resolved = await this.resolve(path, id);
+				const absolute =
+					resolved?.id.split('?')[0] ?? resolve(dirname(file), path);
+				if (!absolute.endsWith('.json')) continue;
+				try {
+					const json: unknown = JSON.parse(readFileSync(absolute, 'utf-8'));
+					if (!isDictionary(json)) {
+						console.warn(
+							`${LOG_PREFIX} ${relative(root, absolute)} is not a flat object of strings, skipped.`
 						);
 					}
-					return;
-				}
-
-				// --- createI18n({ dictionaries: { en: ..., nl: ... } }) ---
-				if (
-					call.callee.type === 'Identifier' &&
-					(call.callee as Identifier).name === 'createI18n'
-				) {
-					const arg = call.arguments[0];
-					if (arg?.type !== 'ObjectExpression') return;
-
-					const dictProp = (arg as unknown as ObjectExpression).properties.find(
-						(p) =>
-							p.type === 'Property' &&
-							(p as Property).key.type === 'Identifier' &&
-							((p as Property).key as Identifier).name === 'dictionaries'
+				} catch (error) {
+					console.warn(
+						`${LOG_PREFIX} Could not read ${relative(root, absolute)}: ${error instanceof Error ? error.message : error}`
 					);
-					if (!dictProp || dictProp.type !== 'Property') return;
-
-					const dictValue = (dictProp as Property).value;
-					if (dictValue.type !== 'ObjectExpression') return;
-
-					sourcePromises.push(
-						processSources(
-							extractSources(dictValue as unknown as ObjectExpression),
-							id,
-							fetchPromises,
-							devServer,
-							mergeAndSchedule,
-							isLocaleDictionary,
-							resolveId
-						)
-					);
-					return;
 				}
-			});
+				files.push(absolute);
+				this.addWatchFile(absolute);
+			}
 
-			await Promise.all(sourcePromises);
-			await Promise.all(fetchPromises);
+			byModule.set(file, { files, fetched });
+			schedule();
+
+			if (fetchEnabled && sources.urls.length) {
+				const pendingFetch = Promise.all(sources.urls.map(fetchDictionary)).then(
+					(dictionaries) => {
+						if (generation.get(file) !== run) return;
+						for (const dictionary of dictionaries) {
+							if (dictionary)
+								Object.keys(dictionary).forEach((k) => fetched.add(k));
+						}
+						schedule();
+					}
+				);
+				// In dev, never block the transform on the network.
+				// In a build, wait so the types are complete when the build ends.
+				if (!isDev) await pendingFetch;
+			}
+
 			return null;
+		},
+
+		watchChange(id) {
+			const file = id.split('?')[0];
+			for (const { files } of byModule.values()) {
+				if (files.includes(file)) return schedule();
+			}
+		},
+
+		buildEnd() {
+			if (!isDev) write();
 		}
 	};
 }
+
+/** @deprecated Use `i18n` from `@svelte-i18n/core/vite`. */
+export const i18nPlugin = i18n;

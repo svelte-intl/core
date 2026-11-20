@@ -6,6 +6,7 @@ import type {
 	OptionalParams,
 	UnwrapResolver
 } from './types.js';
+import { getLocale } from './locale.ts';
 
 type ExtensionLayers<Locales extends string> = Partial<
 	Record<Locales, DictionaryResolver<Record<string, string>>[]>
@@ -44,7 +45,8 @@ export type CreateI18nOptions<
 	Locales extends string,
 	Locale extends Locales = Locales,
 	Dicts extends Record<Locales, DictionaryResolver<Record<string, string>>> =
-		Record<Locales, DictionaryResolver<Record<string, string>>>
+		Record<Locales, DictionaryResolver<Record<string, string>>>,
+	Strict extends boolean = false
 > = {
 	locales: Locales[];
 	locale: Locale | (string & {});
@@ -52,6 +54,13 @@ export type CreateI18nOptions<
 	fallbackLocale?: Locale;
 	/** Cookie name used when persisting the locale via `setLocale`. Defaults to `lang`. */
 	cookieName?: string;
+	/**
+	 * When `true`, `t` only accepts keys that exist in the dictionaries, so typos
+	 * are type errors. Keys added with `extend` are not known to the type system,
+	 * so include them in your dictionary type when using strict mode.
+	 * Defaults to `false`.
+	 */
+	strict?: Strict;
 };
 
 export type I18nInstance<
@@ -79,44 +88,16 @@ const loadDictionary = async <
 	dictionaries: Record<Locales, DictionaryResolver<Dictionary>>,
 	dictionariesExtensions?: ExtensionLayers<Locales>
 ) => {
-	const extendedMessages = await resolveExtensions(locale, dictionariesExtensions);
+	const extendedMessages = await resolveExtensions(
+		locale,
+		dictionariesExtensions
+	);
 
 	if (typeof dictionaries[locale] === 'function') {
 		return { ...(await dictionaries[locale]()), ...extendedMessages };
 	}
 
 	return { ...dictionaries[locale], ...extendedMessages };
-};
-
-/**
- * Determines the appropriate locale to use based on the provided locale,
- * the list of supported locales, and an optional fallback locale.
- *
- * @param locale - The locale to check (e.g. "en-US")
- * @param supportedLocales - The list of supported locales (e.g. ["en", "nl"])
- * @param fallbackLocale - An optional fallback locale to use if the provided locale is not supported (e.g. "en")
- *
- * @returns The determined locale to use (e.g. "en")
- */
-const getLocale = (
-	locale: string,
-	supportedLocales: string[],
-	fallbackLocale?: string
-) => {
-	if (supportedLocales.includes(locale)) {
-		return locale;
-	}
-
-	const language = locale.split('-')[0];
-	if (supportedLocales.includes(language)) {
-		return language;
-	}
-
-	if (fallbackLocale) {
-		return fallbackLocale;
-	}
-
-	return supportedLocales[0];
 };
 
 /**
@@ -135,15 +116,23 @@ const getLocale = (
  *
  * setContext(I18N_CONTEXT_KEY, i18n);
  */
+/** Matches `{name}` placeholders. Mirrors `ExtractMessageParams` in types.d.ts. */
+const PLACEHOLDER = /\{([^{}]+)\}/g;
+
+/** Own-property check, so keys like `toString` never resolve to prototype members. */
+const hasOwn = (object: object, key: PropertyKey) =>
+	Object.prototype.hasOwnProperty.call(object, key);
+
 export const I18N_CONTEXT_KEY = Symbol('i18n');
 export const createI18n = async <
 	Dictionary extends Record<string, string> | InferDict = InferDict,
 	Locales extends string = string,
 	Locale extends Locales = Locales,
 	Dicts extends Record<Locales, DictionaryResolver<Record<string, string>>> =
-		Record<Locales, DictionaryResolver<Record<string, string>>>
+		Record<Locales, DictionaryResolver<Record<string, string>>>,
+	Strict extends boolean = false
 >(
-	options: CreateI18nOptions<Locales, Locale, Dicts>
+	options: CreateI18nOptions<Locales, Locale, Dicts, Strict>
 ) => {
 	type EffectiveDictionary = [Dictionary] extends [InferDict]
 		? UnwrapResolver<Dicts[Locales]> extends Record<string, string>
@@ -153,7 +142,9 @@ export const createI18n = async <
 			? Dictionary
 			: Record<string, string>;
 
-	let loading = $state(true);
+	/** In strict mode only known keys are accepted by `t`. */
+	type AllowedKey = [Strict] extends [true] ? never : string & {};
+
 	let locales = $state(options.locales);
 	const initialLocale = getLocale(
 		options.locale as Locales,
@@ -165,37 +156,10 @@ export const createI18n = async <
 	let dictionariesExtensions: ExtensionLayers<Locales> | undefined =
 		$state.raw();
 	let dictionaries = $state.raw(options.dictionaries);
-	let loadGeneration = 0;
+	const cookieName = options.cookieName ?? 'lang';
 
-	const reloadDictionary = async () => {
-		const generation = ++loadGeneration;
-		loading = true;
-
-		try {
-			const loadedDictionary = await loadDictionary(
-				locale as Locales,
-				options.dictionaries,
-				dictionariesExtensions
-			);
-
-			if (generation === loadGeneration) {
-				dictionary = loadedDictionary;
-			}
-
-			return loadedDictionary;
-		} catch (error) {
-			console.error(
-				`Failed to load dictionary for locale "${locale}":`,
-				error
-			);
-			throw error;
-		} finally {
-			if (generation === loadGeneration) {
-				loading = false;
-			}
-		}
-	};
-
+	// The initial dictionary is loaded before createI18n resolves, so the
+	// instance starts in a settled state on both server and client.
 	let dictionary = $state.raw(
 		await loadDictionary(
 			initialLocale as Locales,
@@ -204,59 +168,57 @@ export const createI18n = async <
 		)
 	);
 
-	if (browser) {
-		loading = false;
-	}
-
-	$effect.root(() => {
-		let initial = true;
-
-		$effect(() => {
-			locale;
-
-			if (initial) {
-				initial = false;
-				return;
-			}
-
-			// Prevents the loading state from being set to true on the initial load, which can cause a flash of loading indicators in the UI.
-			// By deferring the setting of the loading state until after the initial render,
-			// we ensure that the loading indicator only appears when the locale is actually being changed by the user,
-			// and not during the initial setup of the i18n instance.
-			setTimeout(() => {
-				loading = true;
-			});
-
-			if (!locales.includes(locale as Locales)) {
-				console.warn(
-					`Locale "${locale}" is not in the list of supported locales: ${locales.join(', ')}.`
-				);
-
-				locale = options.fallbackLocale ?? locales[0];
-			}
-
-			void reloadDictionary();
+	/**
+	 * Locale switches and `extend` calls run one at a time, in call order.
+	 * Each task commits its result only after loading succeeded, so `locale`,
+	 * `dictionary`, the cookie and `<html lang>` never disagree.
+	 */
+	let pending = $state(0);
+	let queue: Promise<unknown> = Promise.resolve();
+	const enqueue = <T>(task: () => Promise<T>): Promise<T> => {
+		pending++;
+		const run = queue.then(task).finally(() => {
+			pending--;
 		});
-	});
+		queue = run.catch(() => {});
+		return run;
+	};
 
-	const t = <Key extends keyof EffectiveDictionary | (string & {})>(
+	/** Incremented on every setLocale call, so superseded switches are skipped. */
+	let localeRequest = 0;
+
+	const persistLocale = (value: string) => {
+		const secure =
+			typeof location !== 'undefined' && location.protocol === 'https:'
+				? '; Secure'
+				: '';
+		document.cookie = `${encodeURIComponent(cookieName)}=${encodeURIComponent(value)}; path=/; max-age=31536000; SameSite=Lax${secure}`;
+		document.documentElement.lang = value;
+	};
+
+	const t = <Key extends keyof EffectiveDictionary | AllowedKey>(
 		key: Key,
 		...args: Key extends keyof EffectiveDictionary
 			? OptionalParams<EffectiveDictionary[Key], Key>
 			: [params?: Record<string, string | number>]
-	) => {
-		// @ts-expect-error key mapping
-		let message: string | number = dictionary[key] || key;
-		// @ts-expect-error params mapping
-		let params = args[0] as Record<string, string | number> | undefined;
+	): string => {
+		const value = hasOwn(dictionary, key)
+			? (dictionary as Record<string, unknown>)[key as string]
+			: undefined;
+		// A missing or empty translation falls back to the key itself.
+		const message =
+			typeof value === 'string' && value !== '' ? value : String(key);
+		const params = (args as unknown[])[0] as
+			| Record<string, string | number>
+			| undefined;
 
-		if (params) {
-			for (const [paramKey, paramValue] of Object.entries(params)) {
-				message = String(message).replace(`{${paramKey}}`, String(paramValue));
-			}
-		}
+		if (!params) return message;
 
-		return message as string;
+		// Single pass: every occurrence is replaced, values are inserted
+		// literally and never re-scanned for placeholders.
+		return message.replace(PLACEHOLDER, (match, name: string) =>
+			hasOwn(params, name) ? String(params[name]) : match
+		);
 	};
 
 	const i18n = {
@@ -319,13 +281,19 @@ export const createI18n = async <
 		 * @readonly
 		 */
 		get loading() {
-			return { current: loading };
+			return { current: pending > 0 };
 		},
 		/**
-		 * Sets the currently active locale. This will cause all components that use the `t` function to re-render with the new locale.
-		 * In the browser, this also stores the locale in a cookie (see `cookieName` option) and updates `document.documentElement.lang`.
+		 * Switches to another locale. The dictionary is loaded first; the locale, the
+		 * translations and (in the browser) the cookie and `document.documentElement.lang`
+		 * are only updated once loading succeeded.
 		 *
-		 * @param newLocale - The new locale to set. This should be one of the locales defined in the `locales` prop.
+		 * - An unsupported locale is ignored with a console warning.
+		 * - If loading fails, nothing changes and the returned promise rejects.
+		 * - When called several times in a row, the last call wins.
+		 *
+		 * @param newLocale - One of the locales passed to `createI18n`.
+		 * @returns A promise that resolves when the switch is done.
 		 * @example
 		 * import { useI18n } from '#lib/i18n';
 		 *
@@ -334,13 +302,43 @@ export const createI18n = async <
 		 * <button onclick={() => setLocale('en')}>Switch to English</button>
 		 * <button onclick={() => setLocale('nl')}>Switch to Dutch</button>
 		 */
-		setLocale(newLocale: Locales) {
-			locale = newLocale as Locale;
-
-			if (browser) {
-				document.cookie = `${options.cookieName ?? 'lang'}=${newLocale};path=/;max-age=31536000;SameSite=Lax`;
-				document.documentElement.lang = newLocale;
+		async setLocale(newLocale: Locales): Promise<void> {
+			if (!locales.includes(newLocale)) {
+				console.warn(
+					`[@svelte-i18n/core] Locale "${newLocale}" is not supported. Supported locales: ${locales.join(', ')}.`
+				);
+				return;
 			}
+
+			const request = ++localeRequest;
+
+			await enqueue(async () => {
+				// A newer setLocale call was made while this one was waiting.
+				if (request !== localeRequest) return;
+
+				let loaded: Record<string, string>;
+				try {
+					loaded = await loadDictionary(
+						newLocale,
+						options.dictionaries,
+						dictionariesExtensions
+					);
+				} catch (error) {
+					console.error(
+						`[@svelte-i18n/core] Failed to load dictionary for locale "${newLocale}":`,
+						error
+					);
+					throw error;
+				}
+
+				// Superseded while loading: don't flash an intermediate locale.
+				if (request !== localeRequest) return;
+
+				dictionary = loaded as typeof dictionary;
+				locale = newLocale;
+
+				if (browser) persistLocale(newLocale);
+			});
 		},
 		/**
 		 * Gets the currently active locale.
@@ -394,7 +392,7 @@ export const createI18n = async <
 		 * {/if}
 		 */
 		getLoading() {
-			return loading;
+			return pending > 0;
 		},
 		/**
 		 * The translation function. This function takes a message key and an optional object of parameters,
@@ -413,8 +411,9 @@ export const createI18n = async <
 		 */
 		t,
 		/**
-		 * Gets the fallback locale defined in the i18n options. This is the locale that will
-		 * be used if the active locale is not supported or if a translation is missing.
+		 * Gets the fallback locale defined in the i18n options. It is used when the
+		 * requested locale is not supported. It is not used for missing keys:
+		 * `t` returns the key itself when a translation is missing.
 		 *
 		 * This can be useful for conditionally rendering content based on the fallback locale,
 		 * or for displaying the fallback language in a UI element.
@@ -448,8 +447,9 @@ export const createI18n = async <
 		 * When you call this method, it will merge the provided additional messages with the existing dictionary for each specified locale.
 		 * If the same message key exists in both the existing dictionary and the additional messages, the value from the additional messages will take precedence.
 		 * Multiple calls to `extend` are accumulated; later values override earlier ones for the same key.
+		 * If loading the active locale's extension fails, the extension is not added and the promise rejects.
 		 *
-		 * @returns A promise that resolves to the i18n instance, allowing for method chaining.
+		 * @returns A promise that resolves to the i18n instance. Await each call; the promise itself has no `extend` method.
 		 * @example
 		 * import { useI18n } from '#lib/i18n';
 		 *
@@ -468,11 +468,27 @@ export const createI18n = async <
 		 * });
 		 */
 		async extend<D extends ExtendDictionaries<Locales>>(dictionaries: D) {
-			dictionariesExtensions = appendExtensions(
-				dictionariesExtensions,
-				dictionaries
-			);
-			await reloadDictionary();
+			await enqueue(async () => {
+				const layers = appendExtensions(dictionariesExtensions, dictionaries);
+				let loaded: Record<string, string>;
+				try {
+					loaded = await loadDictionary(
+						locale as Locales,
+						options.dictionaries,
+						layers
+					);
+				} catch (error) {
+					console.error(
+						`[@svelte-i18n/core] Failed to load extended dictionary for locale "${locale}":`,
+						error
+					);
+					throw error;
+				}
+
+				// Commit only after a successful load.
+				dictionariesExtensions = layers;
+				dictionary = loaded as typeof dictionary;
+			});
 			return i18n;
 		}
 	};

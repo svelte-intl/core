@@ -236,7 +236,6 @@ describe('createI18n', () => {
 				locale: 'en',
 				dictionaries: makeDictionaries()
 			});
-			// @ts-expect-error intentionally testing a missing key
 			expect(i18n.t('missing_key')).toBe('missing_key');
 		});
 
@@ -308,7 +307,7 @@ describe('createI18n', () => {
 				locale: 'en',
 				dictionaries: makeDictionaries()
 			});
-			i18n.setLocale('nl');
+			await i18n.setLocale('nl');
 			expect(i18n.getLocale()).toBe('nl');
 		});
 
@@ -318,9 +317,9 @@ describe('createI18n', () => {
 				locale: 'en',
 				dictionaries: makeDictionaries()
 			});
-			i18n.setLocale('nl');
+			await i18n.setLocale('nl');
 			expect(i18n.getLocale()).toBe('nl');
-			i18n.setLocale('en');
+			await i18n.setLocale('en');
 			expect(i18n.getLocale()).toBe('en');
 		});
 	});

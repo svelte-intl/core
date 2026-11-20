@@ -4,7 +4,7 @@
 
 	type Props = {
 		children: Snippet;
-		i18n: ReturnType<typeof import('./i18n.svelte.ts').createI18n>['i18n'];
+		i18n: Awaited<ReturnType<typeof import('./i18n.svelte.ts').createI18n>>;
 	};
 
 	const { children, i18n }: Props = $props();
